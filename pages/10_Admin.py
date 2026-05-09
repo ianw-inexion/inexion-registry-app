@@ -9,6 +9,7 @@ from src.config import (
     HRS_VBS_PARQUET, HRS_PUBLIC_PARQUET, HRS_DBS_PARQUET,
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET,
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET, MIDUS_CODEBOOK_PARQUET,
+    NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET, NSHAP_CODEBOOK_PARQUET,
     BRFSS_STATE_PARQUET, BRFSS_METRO_PARQUET,
     NHANES_MORTALITY_PARQUET, HRS_MORTALITY_PARQUET, MIDUS_MORTALITY_PARQUET,
     data_exists,
@@ -36,7 +37,6 @@ st.markdown(
 def file_stat(path) -> dict:
     from src.config import IS_S3, data_exists
     if IS_S3:
-        # For S3 paths just report as present - size/date not critical in cloud
         exists = data_exists(path)
         return {"exists": exists, "size_mb": None, "modified": None}
     path = Path(path)
@@ -56,17 +56,20 @@ st.markdown("### Registry Data Files")
 ALL_FILES = [
     ("NHANES harmonized (all cycles)",       NHANES_HARMONIZED,       "NHANES"),
     ("NHANES with PhenoAge + KDM",           NHANES_PARQUET,          "NHANES"),
+    ("NHANES Linked Mortality (LMF 2019)",   NHANES_MORTALITY_PARQUET,"NHANES"),
     ("HRS 2016 VBS - PhenoAge",              HRS_VBS_PARQUET,         "HRS"),
     ("HRS 2016 Public Survey",               HRS_PUBLIC_PARQUET,      "HRS"),
     ("HRS DBS Longitudinal (2006-2016)",     HRS_DBS_PARQUET,         "HRS"),
     ("HRS Epigenetic Clocks",                HRS_EPIGEN_PARQUET,      "HRS"),
     ("HRS Pace of Aging (DunedinPACE)",      HRS_POA_PARQUET,         "HRS"),
     ("HRS RAND mortality (death dates)",     HRS_MORTALITY_PARQUET,   "HRS"),
-    ("NHANES Linked Mortality (LMF 2019)",   NHANES_MORTALITY_PARQUET,"NHANES"),
     ("MIDUS NDI mortality (37237 + 38024)",  MIDUS_MORTALITY_PARQUET, "MIDUS"),
     ("MIDUS Biomarker (M2 + R1 + M3)",       MIDUS_BIO_PARQUET,       "MIDUS"),
     ("MIDUS 3 Cognitive (BTACT)",            MIDUS_COG_PARQUET,       "MIDUS"),
     ("MIDUS variable codebook",              MIDUS_CODEBOOK_PARQUET,  "MIDUS"),
+    ("NSHAP Biomarker (R1 + R2 + R3)",       NSHAP_BIO_PARQUET,       "NSHAP"),
+    ("NSHAP Social / Sensory / Cognition",   NSHAP_SOCIAL_PARQUET,    "NSHAP"),
+    ("NSHAP variable codebook",              NSHAP_CODEBOOK_PARQUET,  "NSHAP"),
     ("BRFSS state market scores (2024)",     BRFSS_STATE_PARQUET,     "BRFSS"),
     ("BRFSS metro market scores (2024)",     BRFSS_METRO_PARQUET,     "BRFSS"),
     ("Headline analyses directory",          HEADLINE_DIR,            "Analyses"),
@@ -100,61 +103,42 @@ st.markdown("---")
 st.markdown("### NHANES Coverage Snapshot")
 try:
     stats = data.dataset_stats()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total rows", f"{int(stats['n_total']):,}")
-    c2.metric("PhenoAge coverage",
-              f"{int(stats['n_with_phenoage']):,}",
-              delta=f"{100*stats['n_with_phenoage']/stats['n_total']:.1f}%")
-    c3.metric("KDM coverage",
-              f"{int(stats['n_with_kdm']):,}",
-              delta=f"{100*stats['n_with_kdm']/stats['n_total']:.1f}%")
-    c4.metric("Cycle range", f"{int(stats['min_year'])}-{int(stats['max_year'])}")
-except Exception as e:
-    st.error(f"Coverage query failed: {e}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Rows", f"{int(stats['n_total']):,}")
+    c2.metric("With PhenoAge", f"{int(stats['n_with_phenoage']):,}")
+    c3.metric("Cycles", f"{int(stats['n_cycles'])}")
+except Exception as _e:
+    st.warning(f"Coverage error: {_e}")
 
-# Mortality coverage snapshot
+# Mortality outcome coverage
 st.markdown("---")
 st.markdown("### Mortality Outcome Coverage")
-mort_rows = []
-def _summ(label, path, status_col, time_col, baseline_label):
-    if not data_exists(path):
-        return {"Cohort": label, "n": "-", "Deaths": "-", "Death rate": "-",
-                "Median follow-up (yrs)": "-", "Baseline": baseline_label, "Status": "MISSING"}
-    df = pd.read_parquet(path, columns=[status_col, time_col])
-    df = df.dropna(subset=[status_col])
-    n = len(df)
-    deaths = int(df[status_col].sum())
-    median_t = float(df[time_col].median()) if time_col in df.columns else None
-    return {
-        "Cohort": label, "n": f"{n:,}", "Deaths": f"{deaths:,}",
-        "Death rate": f"{100*deaths/n:.1f}%" if n else "-",
-        "Median follow-up (yrs)": f"{median_t:.1f}" if median_t is not None else "-",
-        "Baseline": baseline_label, "Status": "OK",
-    }
-
 try:
-    from src.config import (NHANES_MORTALITY_PARQUET as _NMP,
-                             HRS_VBS_PARQUET as _HVBS,
-                             HRS_PUBLIC_PARQUET as _HPUB,
-                             HRS_MORTALITY_PARQUET as _HMP,
-                             MIDUS_BIO_PARQUET as _MBP)
-    mort_rows.append(_summ("NHANES (LMF, censor 2019-12-31)",
-                            _NMP, "mortality_status", "years_int_to_event",
-                            "interview date"))
-    mort_rows.append(_summ("HRS VBS (RAND mortality, censor 2023-01-01)",
-                            _HVBS, "mortality_status", "years_to_event",
-                            "2016.5 (Wave 13)"))
-    mort_rows.append(_summ("HRS Public 2016 (RAND mortality)",
-                            _HPUB, "mortality_status", "years_to_event",
-                            "2016.5"))
-    mort_rows.append(_summ("MIDUS Biomarker (NDI 37237 + 38024)",
-                            _MBP, "mortality_status", "years_to_event",
-                            "wave-mid"))
-    st.dataframe(pd.DataFrame(mort_rows), use_container_width=True, hide_index=True)
+    import pyarrow.parquet as _pq
+    def _summ(label, path, time_col, event_col):
+        if not data_exists(path):
+            return {"Cohort": label, "n": "missing", "events": "-", "Median follow-up (yr)": "-"}
+        df = pd.read_parquet(path, columns=[time_col, event_col])
+        n = len(df)
+        events = int(df[event_col].sum()) if event_col in df.columns else 0
+        med = df[time_col].median() if time_col in df.columns else float('nan')
+        return {"Cohort": label, "n": f"{n:,}", "events": f"{events:,}",
+                "Median follow-up (yr)": f"{med:.1f}" if pd.notna(med) else "-"}
+
+    mort_rows = []
+    if data_exists(NHANES_MORTALITY_PARQUET):
+        mort_rows.append(_summ("NHANES + LMF",        NHANES_MORTALITY_PARQUET,
+                                "years_int_to_event", "mortality_status"))
+    if data_exists(MIDUS_MORTALITY_PARQUET):
+        mort_rows.append(_summ("MIDUS Biomarker (NDI 37237 + 38024)",
+                                MIDUS_MORTALITY_PARQUET, "years_to_event", "mortality_status"))
+
+    st.dataframe(pd.DataFrame(mort_rows), width="stretch", hide_index=True)
     st.caption(
-        "NHANES Linked Mortality Files cover NHANES 1999-2018 with follow-up through 2019-12-31. "
+        "NHANES mortality from CDC Linked Mortality File (LMF) 1999-2019. "
         "HRS mortality from RAND HRS Longitudinal File 1992-2022 (death year + month). "
-        "MIDUS NDI (ICPSR 37237 Core + 38024 Refresher 1) is public download but not yet ingested."
+        "MIDUS NDI (ICPSR 37237 Core + 38024 Refresher 1) is public download. "
+        "NSHAP R3 deceased flag in nshap_mortality.parquet (binary - no follow-up time)."
     )
 except Exception as _e:
     st.error(f"Mortality coverage error: {_e}")
@@ -168,9 +152,12 @@ PAGES = [
     ("2. HRS Explorer",               "VBS PhenoAge - Clock comparison - DBS longitudinal biomarker trends - Health & function - Demographics"),
     ("3. MIDUS Explorer",             "3 biomarker waves (2004-2022, n=2,865) + M3 cognitive (n=3,291) - 9-marker inflammation panel - Cardiometabolic - Neuroendocrine - KDM bioage - Wave comparison"),
     ("3. Market Intelligence",        "BRFSS 2024 state and metro longevity market scoring (n=457,670)"),
-    ("4. Patient Analysis",           "Single lab upload (or manual entry) feeds 3 tabs: Biological Age (PhenoAge + 10-yr mortality), Normative Reference (percentile vs. NHANES age-sex), Intervention Simulator (biomarker contributions + what-if sliders)"),
+    ("3c. NSHAP Explorer",            "NSHAP R1+R2+R3 (2005-2016, n=10,578 stacked obs) - DBS biomarkers (R1+R2: HbA1c/CRP/EBV/hemoglobin) - in-home social network roster - sensory measures (smell/hearing/peak flow) - MoCA cognition - timed gait - R3 biomarkers pending separate ICPSR release"),
+    ("4. Patient Analysis",           "Single lab upload (or manual entry) feeds 6 tabs: Biological Age (PhenoAge + 10-yr mortality), Normative Reference (percentile vs. NHANES age-sex-race), PhenoAge Intervention, Metabolic Age, Liver Age, Kidney Age (NHANES-trained organ clocks)"),
     ("5. Validation",                 "Cox PH + Kaplan-Meier + concordance index for every clock against linked mortality - NHANES PhenoAge, HRS VBS PhenoAge, MIDUS KDM, and HRS clock head-to-head (PhenoAge vs GrimAge2 vs DunedinPACE)"),
-    ("7. Research Workbench",         "No-code hypothesis testing - Partial correlations - OLS regression - Scatter plots - NHANES + HRS + MIDUS"),
+    ("6. Organ Ages",                 "Phase 4 - Inflammation / Liver / Kidney / Metabolic age clocks; mortality validation Cox HRs per organ; cross-clock correlation"),
+    ("6b. Methylation Clocks",        "Phase 6 v0 - GrimAge2, DunedinPACE methyl + behavioral (HRS), DNAm-imputed CRP/HbA1c, top-quintile concordance, UKB roadmap"),
+    ("7. Research Workbench",         "No-code hypothesis testing - 5 model types (OLS / Cox PH / Logistic / Mixed-effects / GAM) - BH-FDR session log - NHANES + HRS + HRS DBS + MIDUS + NSHAP"),
     ("8. Dataset Catalog",            "Full inventory of all loaded, pending, and incoming datasets with access details"),
     ("9. Variable Dictionary",        "Definitions, units, and groupings for all registry variables"),
     ("10. Admin",                     "This page - pipeline health, data freshness, deployment status"),
@@ -185,10 +172,13 @@ st.markdown("### Deployment Status")
 
 status_items = [
     ("OK",      "S3 bucket provisioned",             "inexion-registry (us-east-2) - 4 zones: raw / curated / analytics / dev"),
-    ("OK",      "All parquets uploaded to S3",       "temp_Ian_Nirav/staging/ - NHANES + all HRS datasets + MIDUS - May 2026"),
+    ("OK",      "All parquets uploaded to S3",       "temp_Ian_Nirav/staging/ - NHANES + all HRS + MIDUS + NSHAP - May 2026"),
     ("OK",      "AWS billing alert",                 "$200/month CloudWatch alarm -> ianw@inexion.com"),
     ("OK",      "IAM users created",                 "ian_wendt (admin + billing) - nirav_vira (admin)"),
     ("OK",      "MIDUS public ICPSR ingested",       "M2 + Refresher 1 + M3 biomarker + M3 BTACT cognitive - 2,865 + 3,291 obs"),
+    ("OK",      "NSHAP R1+R2+R3 ingested (public-use)","ICPSR 20541/34921/36873 via pyreadr - 10,578 stacked obs - biomarkers + social + R3 mortality"),
+    ("Pending", "NSHAP R3 biomeasures release",      "Open ICPSR/NORC inquiry - DBS assays not present in 36873 public or restricted; brief drafted for Anant"),
+    ("Pending", "NSHAP R4 (2021-23)",                "ICPSR 39511 - restricted-only, IRB pending"),
     ("Pending", "AWS Glue catalog",                  "Pending Nirav - databases: inexion_raw / curated / analytics"),
     ("Pending", "Athena workgroups",                 "Pending Nirav - per-user spend limits"),
     ("Pending", "Auth (Google SSO + magic-link)",    "Pending - Supabase project + Railway deployment"),

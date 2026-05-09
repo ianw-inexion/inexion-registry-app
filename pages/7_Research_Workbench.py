@@ -22,7 +22,8 @@ import plotly.graph_objects as go
 from src.config import (data_exists, NAVY, GOLD, CORAL, TEAL,
                         NHANES_PARQUET, HRS_VBS_PARQUET, HRS_PUBLIC_PARQUET,
                         HRS_DBS_PARQUET, NHANES_MORTALITY_PARQUET,
-                        MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET)
+                        MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
+                        NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET)
 
 st.set_page_config(page_title="Research Workbench - INEXION Registry", layout="wide")
 
@@ -171,6 +172,45 @@ MIDUS_VARS = {
     'years_to_event':           'Years to event',
 }
 
+NSHAP_VARS = {
+    'nshap_id':         'NSHAP respondent ID',
+    'age':              'Age (years)',
+    'sex':              'Sex (1=M, 2=F)',
+    'race_ethnicity':   'Race / Ethnicity (1=NH White, 2=NH Black, 3=Hispanic, 4=Other)',
+    'education':        'Education (1=<HS, 2=HS, 3=Some college, 4=BA+)',
+    'weight_adj':       'NSHAP survey weight (normalized)',
+    # Anthropometry / vitals
+    'bmi':              'Body Mass Index (kg/m^2)',
+    'height_cm':        'Height (cm)',
+    'weight_kg':        'Weight (kg)',
+    'waist_cm':         'Waist circumference (cm)',
+    'systolic_mean':    'Systolic BP (mmHg)',
+    'diastolic_mean':   'Diastolic BP (mmHg)',
+    'pulse_mean':       'Pulse (bpm)',
+    # Blood biomarkers (R1+R2 only - R3 biomarkers pending)
+    'hba1c_pct':        'HbA1c (%)',
+    'crp_mg_l':         'CRP (mg/L)',
+    'ebv_titer':        'EBV antibody titer',
+    'hemoglobin':       'Hemoglobin (g/dL)',
+    'a1c_whbl':         'HbA1c, whole blood (%)',
+    'crp_plsm':         'CRP, plasma (mg/L)',
+    # Saliva
+    'dhea_1':           'DHEA, sample 1 (saliva)',
+    'dhea_2':           'DHEA, sample 2 (saliva)',
+    # Network + sensory + functional (from social parquet)
+    'network_alters':   'Network size (alters named)',
+    'network_close':    'Close confidants (count)',
+    'network_close_knit': 'Network closeness (1-5)',
+    'hearing':          'Hearing (self-rated, 1-5)',
+    'smell':            'Smell test (R1 only)',
+    'walk_speed_s':     'Timed walk (seconds)',
+    'walk_block':       'Walks 1 block (0=cannot)',
+    'walk_room':        'Walks across room (0=cannot)',
+    'moca_total':       'MoCA cognitive total (R2-R3)',
+    'wave_year':        'Round midpoint year',
+    'round':            'NSHAP round',
+}
+
 
 # ===========================================================================
 # Stats helpers
@@ -266,10 +306,26 @@ def load_midus():
     return bio
 
 
+@st.cache_data
+def load_nshap():
+    """NSHAP biomarker + social merged on (nshap_id, round)."""
+    if not data_exists(NSHAP_BIO_PARQUET):
+        return pd.DataFrame()
+    bio = pd.read_parquet(NSHAP_BIO_PARQUET)
+    if data_exists(NSHAP_SOCIAL_PARQUET):
+        soc = pd.read_parquet(NSHAP_SOCIAL_PARQUET)
+        # Drop overlapping columns from soc before merge so we don't get _x/_y
+        overlap = set(bio.columns) & set(soc.columns) - {'nshap_id', 'round'}
+        soc = soc.drop(columns=list(overlap))
+        bio = bio.merge(soc, on=['nshap_id', 'round'], how='left')
+    return bio
+
+
 nhanes = load_nhanes()
 hrs    = load_hrs_vbs()
 dbs    = load_dbs()
 midus  = load_midus()
+nshap  = load_nshap()
 
 if "wb_log" not in st.session_state:
     st.session_state["wb_log"] = []
@@ -619,7 +675,8 @@ with col_left:
         "Dataset",
         ["NHANES 2001-2018", "HRS 2016 (VBS + Survey)",
          "HRS DBS Longitudinal (2006-2016)",
-         "MIDUS (M2 + R1 + M3, 2004-2022)"],
+         "MIDUS (M2 + R1 + M3, 2004-2022)",
+         "NSHAP (R1 + R2 + R3, 2005-2016)"],
     )
     if dataset.startswith("NHANES"):
         df = nhanes
@@ -627,6 +684,9 @@ with col_left:
     elif dataset.startswith("HRS DBS"):
         df = dbs
         var_dict = {**DBS_VARS}
+    elif dataset.startswith("NSHAP"):
+        df = nshap
+        var_dict = {**NSHAP_VARS}
     elif dataset.startswith("HRS"):
         df = hrs
         var_dict = {**HRS_VARS, **HRS_SURVEY_VARS}

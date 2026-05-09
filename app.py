@@ -25,6 +25,7 @@ from src.config import (data_exists,
     NHANES_PARQUET, HRS_VBS_PARQUET, HRS_DBS_PARQUET,
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET, HRS_PUBLIC_PARQUET,
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
+    NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET,
 )
 
 st.set_page_config(
@@ -87,29 +88,38 @@ def get_registry_stats():
         df = pd.read_parquet(MIDUS_COG_PARQUET, columns=['midus_id'])
         stats['midus_cog_n'] = len(df)
 
+    if data_exists(NSHAP_BIO_PARQUET):
+        df = pd.read_parquet(NSHAP_BIO_PARQUET, columns=['nshap_id'])
+        stats['nshap_bio_n'] = len(df)
+
     stats['total_observations'] = (
         stats.get('nhanes_n', 0) +
         stats.get('hrs_vbs_n', 0) +
         stats.get('hrs_dbs_obs', 0) +
         stats.get('hrs_epi_n', 0) +
         stats.get('hrs_poa_n', 0) +
-        stats.get('midus_bio_n', 0)
+        stats.get('midus_bio_n', 0) +
+        stats.get('nshap_bio_n', 0)
     )
     stats['datasets_loaded'] = sum(
-        1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n','midus_bio_n']
+        1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n',
+                    'midus_bio_n','nshap_bio_n']
         if k in stats
     )
     return stats
 
 try:
     s = get_registry_stats()
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Datasets loaded", s.get('datasets_loaded', 0))
-    c2.metric("NHANES", f"{s.get('nhanes_n',0):,}")
-    c3.metric("HRS VBS (PhenoAge)", f"{s.get('hrs_vbs_n',0):,}")
-    c4.metric("HRS DBS respondents", f"{s.get('hrs_dbs_n',0):,}")
-    c5.metric("HRS DunedinPACE", f"{s.get('hrs_poa_n',0):,}")
-    c6.metric("MIDUS biomarker", f"{s.get('midus_bio_n',0):,}")
+    c2.metric("Total observations", f"{s.get('total_observations',0):,}")
+    c3.metric("NHANES", f"{s.get('nhanes_n',0):,}")
+    c4.metric("HRS VBS", f"{s.get('hrs_vbs_n',0):,}")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("HRS DBS respondents", f"{s.get('hrs_dbs_n',0):,}")
+    c6.metric("HRS DunedinPACE", f"{s.get('hrs_poa_n',0):,}")
+    c7.metric("MIDUS biomarker", f"{s.get('midus_bio_n',0):,}")
+    c8.metric("NSHAP biomarker", f"{s.get('nshap_bio_n',0):,}")
 except Exception as e:
     st.warning(f"Could not load registry stats: {e}")
 
@@ -178,6 +188,14 @@ with col2:
                 Mean DunedinPACE: 1.49 years per calendar year (population average = 1.0).
             </div>
         </div>
+        <div style='background:#F2F4F8;border-left:4px solid {NAVY};
+                    padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>NSHAP (Rounds 1-3, 2005-2016)</div>
+            <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
+                10,578 observations stacked across 3 rounds (n~3,000-4,400 per wave) - adults 57-85<br>
+                Distinctive for the registry: in-home social-network roster, sensory measures (smell / hearing / peak flow), salivary cortisol + DHEA, MoCA cognition. Round 1+2 have DBS biomarkers (HbA1c, CRP, EBV, hemoglobin); Round 3 biomeasures pending separate ICPSR release. Round 4 restricted-only.
+            </div>
+        </div>
         <div style='background:#F2F4F8;border-left:4px solid {GOLD};
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>BRFSS 2024 - Market Intelligence</div>
@@ -191,7 +209,8 @@ with col2:
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>Incoming</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
                 UK Biobank (application in progress) - All of Us NIH (Anant, Tier 2 pending) -
-                MIDUS CMS-linked restricted tier (Anant) - AgelessRx + Healthspan (DUA in review)
+                MIDUS CMS-linked restricted tier (Anant) - NSHAP R3 biomeasures release (open ask to ICPSR/NORC) -
+                AgelessRx + Healthspan (DUA in review)
             </div>
         </div>
         """,
@@ -217,16 +236,20 @@ with left:
 with right:
     st.markdown(
         "**Patient Analysis** - upload a PDF lab report once (or enter values manually) "
-        "and explore the same patient across three views: PhenoAge biological age + "
+        "and explore the same patient across six tabs: PhenoAge biological age + "
         "10-year mortality risk, normative percentile vs. the U.S. population for their "
-        "age-sex group, and intervention simulation showing which biomarker moves the "
-        "needle most.\n\n"
+        "age-sex-race group, PhenoAge intervention simulator, plus Metabolic / Liver / "
+        "Kidney organ-age clocks (Phase 4 NHANES-trained).\n\n"
         "**Validation Dashboard** - every clock the registry exposes tested against "
         "linked mortality from its source cohort. Cox proportional hazards, "
         "Kaplan-Meier survival curves, and concordance-index head-to-head between "
         "PhenoAge, KDM, GrimAge2, and DunedinPACE.\n\n"
-        "**Research Workbench** - no-code hypothesis testing across NHANES, HRS, and MIDUS. "
-        "Partial correlations, OLS regression, and scatter plots.\n\n"
+        "**Organ Ages + Methylation Clocks** - per-system biological-age clocks "
+        "(Inflammation, Liver, Kidney, Metabolic) and the methylation v0 page surfacing "
+        "GrimAge2 + DunedinPACE in HRS.\n\n"
+        "**Research Workbench** - no-code hypothesis testing across NHANES, HRS, "
+        "HRS DBS, MIDUS, and NSHAP. OLS, Cox PH, logistic, mixed-effects, and GAM "
+        "with BH-FDR session log.\n\n"
         "**Dataset Catalog** - full inventory of what's loaded, what's pending "
         "access, and what's incoming. **Variable Dictionary** - definitions, units, "
         "and groupings for all registry variables."
@@ -237,5 +260,6 @@ st.caption(
     "All source data is de-identified. No PHI is present. "
     "NHANES: CDC public-use files. HRS: University of Michigan / NIA restricted access under RDA. "
     "MIDUS: ICPSR public-use files (CMS-linked restricted tier in progress). "
+    "NSHAP: ICPSR public-use Rounds 1-3 (R3 biomeasures + R4 pending). "
     "Prototype build - auth, audit logging, and remote object storage added in deployment phase."
 )
