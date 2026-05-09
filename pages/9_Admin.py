@@ -28,7 +28,13 @@ st.markdown(
 )
 
 
-def file_stat(path: Path) -> dict:
+def file_stat(path) -> dict:
+    from src.config import IS_S3, data_exists
+    if IS_S3:
+        # For S3 paths just report as present — size/date not critical in cloud
+        exists = data_exists(path)
+        return {"exists": exists, "size_mb": None, "modified": None}
+    path = Path(path)
     if not path.exists():
         return {"exists": False}
     s = path.stat()
@@ -63,14 +69,18 @@ for label, path, group in ALL_FILES:
         st.error(f"  {label} — missing at `{path.name}`")
         continue
     c1, c2, c3 = st.columns([4, 1, 2])
-    c1.markdown(f"  {label}  \n  `{path.name}`")
-    if path.is_file():
+    path_name = str(path).split("/")[-1]
+    c1.markdown(f"  {label}  \n  `{path_name}`")
+    if info['size_mb'] is not None:
         c2.metric("Size", f"{info['size_mb']:.1f} MB")
     else:
-        c2.metric("Type", "Directory")
-    age_days = (dt.datetime.now() - info["modified"]).days
-    c3.metric("Last modified", info["modified"].strftime("%Y-%m-%d"),
-              delta=f"{age_days}d ago")
+        c2.metric("Source", "S3")
+    if info['modified'] is not None:
+        age_days = (dt.datetime.now() - info["modified"]).days
+        c3.metric("Last modified", info["modified"].strftime("%Y-%m-%d"),
+                  delta=f"{age_days}d ago")
+    else:
+        c3.metric("Status", "✅ In S3")
 
 # ── NHANES coverage snapshot ──────────────────────────────────────────────────
 st.markdown("---")
