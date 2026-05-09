@@ -55,38 +55,50 @@ st.markdown(
             background: linear-gradient(180deg, #FAFAFC 0%, #F2F4F8 100%);
         }}
 
-        /* Logo container - st.logo renders into a stLogo-tagged element.
-           Enlarge the inner image and center-align. */
-        [data-testid="stSidebar"] [data-testid="stLogo"],
-        [data-testid="stSidebarHeader"] [data-testid="stLogo"] {{
+        /* Logo - st.logo renders into a stSidebarHeader testid. Force it
+           wider and centered. The inner img often has inline width set by
+           Streamlit so we override with !important. */
+        [data-testid="stSidebarHeader"],
+        [data-testid="stSidebar"] > div > div:first-child:has(img) {{
             display: flex !important;
             justify-content: center !important;
             align-items: center !important;
-            padding: 22px 12px 14px 12px !important;
-            border-bottom: 1px solid rgba(13, 27, 62, 0.08);
-            margin-bottom: 8px;
+            padding: 18px 12px 14px 12px !important;
+            border-bottom: 1px solid rgba(13, 27, 62, 0.08) !important;
+            margin-bottom: 8px !important;
             width: 100% !important;
         }}
+        [data-testid="stSidebarHeader"] img,
         [data-testid="stSidebar"] [data-testid="stLogo"] img,
-        [data-testid="stSidebarHeader"] [data-testid="stLogo"] img {{
-            width: 80% !important;
-            max-width: 220px !important;
+        [data-testid="stSidebar"] [data-testid="stLogo"] {{
+            width: 85% !important;
+            max-width: 240px !important;
             height: auto !important;
-            min-height: 56px !important;
+            min-height: 64px !important;
+            margin: 0 auto !important;
+            display: block !important;
         }}
 
-        /* SECTION HEADERS - all caps, bold, larger, navy on tinted bg.
-           Streamlit's st.navigation renders each group label as a non-link
-           div inside stSidebarNav. We target multiple possible structures
-           to survive minor version changes. */
+        /* SECTION HEADERS - target every plausible Streamlit DOM shape:
+           - <summary> (details/summary collapsibles, current Streamlit)
+           - <h2>/<h3>/[role=heading] (older fallbacks)
+           - non-link divs / spans inside stSidebarNav
+           - first-child of section/li that has no anchor child
+        */
+        [data-testid="stSidebarNav"] summary,
+        [data-testid="stSidebarNav"] details > summary,
+        [data-testid="stSidebarNav"] [data-testid="stSidebarNavSeparator"],
+        [data-testid="stSidebarNav"] li > summary,
         [data-testid="stSidebarNav"] li > div:not(:has(a)),
-        [data-testid="stSidebarNav"] ul > li:has(+ ul) > div,
+        [data-testid="stSidebarNav"] li > span:not(:has(a)),
         [data-testid="stSidebarNav"] [role="heading"],
+        [data-testid="stSidebarNav"] h1,
         [data-testid="stSidebarNav"] h2,
         [data-testid="stSidebarNav"] h3,
         [data-testid="stSidebarNav"] section > h2,
         [data-testid="stSidebarNav"] section > div:not(:has(a)):first-child,
         [data-testid="stSidebarNav"] > ul > div:not(:has(a)),
+        [data-testid="stSidebarNav"] > ul > li > div:not(:has(a)):first-child,
         [data-testid="stSidebarNav"] > div > div > div:first-child:not(:has(a)) {{
             text-transform: uppercase !important;
             letter-spacing: 1.5px !important;
@@ -98,20 +110,31 @@ st.markdown(
             border-radius: 4px !important;
             margin: 14px 8px 4px 8px !important;
             display: block !important;
+            list-style: none !important;
         }}
 
-        /* Belt and suspenders for the section header text node itself
-           (sometimes wrapped in a span or p) */
-        [data-testid="stSidebarNav"] li > div:not(:has(a)) span,
-        [data-testid="stSidebarNav"] li > div:not(:has(a)) p,
-        [data-testid="stSidebarNav"] [role="heading"] span,
-        [data-testid="stSidebarNav"] h2 span,
-        [data-testid="stSidebarNav"] h3 span {{
+        /* And every text-bearing descendant of those header containers */
+        [data-testid="stSidebarNav"] summary *,
+        [data-testid="stSidebarNav"] li > div:not(:has(a)) *,
+        [data-testid="stSidebarNav"] [role="heading"] *,
+        [data-testid="stSidebarNav"] h2 *,
+        [data-testid="stSidebarNav"] h3 * {{
             text-transform: uppercase !important;
             font-size: 13px !important;
             font-weight: 800 !important;
             letter-spacing: 1.5px !important;
             color: {NAVY} !important;
+            background-color: transparent !important;
+        }}
+
+        /* Strip default summary triangle marker so headers look clean */
+        [data-testid="stSidebarNav"] summary::-webkit-details-marker,
+        [data-testid="stSidebarNav"] summary::marker {{
+            display: none !important;
+        }}
+        [data-testid="stSidebarNav"] summary {{
+            list-style: none !important;
+            cursor: default !important;
         }}
 
         /* Nav link rows - rest state */
