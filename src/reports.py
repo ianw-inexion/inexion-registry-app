@@ -910,6 +910,56 @@ def _status_label(status: str) -> str:
     }.get(status, "—")
 
 
+def _row_tinted_table(headers: list[str], rows: list[list[str]],
+                       statuses: list[str], col_widths: list[float],
+                       styles) -> Table:
+    """Branded table that tints ENTIRE rows green/yellow/red based on
+    per-row status codes. Used for the snapshot ages table where the row
+    delta determines the tint, not a single cell."""
+    head_cells = [Paragraph(h, styles["tablehead"]) for h in headers]
+    body_cells = [
+        [Paragraph(str(c), styles["tablecell"]) for c in r] for r in rows
+    ]
+    table = Table([head_cells] + body_cells, colWidths=col_widths,
+                   repeatRows=1)
+    bg_for = {
+        "green":  STATUS_GREEN_BG,
+        "yellow": STATUS_YELLOW_BG,
+        "red":    STATUS_RED_BG,
+    }
+    style_cmds = [
+        ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.25, BORDER),
+    ]
+    for i, status in enumerate(statuses, start=1):
+        bg = bg_for.get(status)
+        if bg:
+            style_cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
+        elif i % 2 == 0:
+            style_cmds.append(("BACKGROUND", (0, i), (-1, i), ROW_ALT))
+    table.setStyle(TableStyle(style_cmds))
+    return table
+
+
+def _classify_age_delta(delta: float | None) -> str:
+    """Tint row green if biologically younger by >1y, red if older by >1y,
+    otherwise neutral. Threshold matches the _delta_phrase wording so the
+    color and the explanatory text agree."""
+    if delta is None:
+        return "neutral"
+    if delta < -1.0:
+        return "green"
+    if delta > 1.0:
+        return "red"
+    return "neutral"
+
+
 # ---------------------------------------------------------------------------
 # PATIENT REPORT
 # ---------------------------------------------------------------------------
@@ -955,32 +1005,46 @@ def build_patient_report(
                    _patient_static_summary(phenoage, organ_ages)
     flow.append(Paragraph(exec_summary, styles["body_lg"]))
 
-    # Snapshot table - chronological vs each clock
+    # Snapshot table - chronological vs each clock. Rows tint green when the
+    # patient is biologically younger than chronological by >1 year, red when
+    # older by >1 year, neutral within ±1 year. The chronological row stays
+    # neutral (no delta to evaluate against itself).
     flow.append(Paragraph("YOUR AGES — CHRONOLOGICAL VS BIOLOGICAL",
                             styles["h2"]))
-    snap_rows = [
+    snap_rows: list[list[str]] = [
         ["Chronological age", f"{patient.get('age', 0)} years",
          "Your age in calendar years."],
         ["Biological age (PhenoAge)",
          f"{phenoage.get('phenoage', 0):.1f} years",
          _delta_phrase(phenoage.get("delta", 0))],
     ]
+    snap_statuses: list[str] = [
+        "neutral",
+        _classify_age_delta(phenoage.get("delta", 0)),
+    ]
     if organ_ages.get("metabolic_age") is not None:
         snap_rows.append(["Metabolic age",
                             f"{organ_ages['metabolic_age']:.1f} years",
                             _delta_phrase(organ_ages.get("metabolic_delta"))])
+        snap_statuses.append(
+            _classify_age_delta(organ_ages.get("metabolic_delta")))
     if organ_ages.get("liver_age") is not None:
         snap_rows.append(["Liver age",
                             f"{organ_ages['liver_age']:.1f} years",
                             _delta_phrase(organ_ages.get("liver_delta"))])
+        snap_statuses.append(
+            _classify_age_delta(organ_ages.get("liver_delta")))
     if organ_ages.get("kidney_age") is not None:
         snap_rows.append(["Kidney age",
                             f"{organ_ages['kidney_age']:.1f} years",
                             _delta_phrase(organ_ages.get("kidney_delta"))])
+        snap_statuses.append(
+            _classify_age_delta(organ_ages.get("kidney_delta")))
 
-    flow.append(_data_table(
-        ["Measurement", "Your value", "What it means"],
-        snap_rows,
+    flow.append(_row_tinted_table(
+        headers=["Measurement", "Your value", "What it means"],
+        rows=snap_rows,
+        statuses=snap_statuses,
         col_widths=[USABLE_W * 0.30, USABLE_W * 0.20, USABLE_W * 0.50],
         styles=styles,
     ))
