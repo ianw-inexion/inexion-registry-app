@@ -467,8 +467,16 @@ def _make_on_page(report_label: str, patient_summary: str):
 # ---------------------------------------------------------------------------
 # Claude narrative generation
 # ---------------------------------------------------------------------------
-def _claude_call(system: str, user: str, max_tokens: int = 2400) -> dict | None:
-    """Single Haiku call expecting a JSON object back. Returns None on failure."""
+# Opus is used for report narrative because clinical-quality writing matters
+# more here than latency or cost. The prompts ask for nuanced patient education
+# at controlled reading levels and quantitative clinical reasoning - Opus
+# handles both reliably; Haiku occasionally drops sections or breaks the JSON
+# contract under longer outputs.
+REPORT_MODEL = "claude-opus-4-6"
+
+
+def _claude_call(system: str, user: str, max_tokens: int = 3500) -> dict | None:
+    """Single Opus call expecting a JSON object back. Returns None on failure."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None
@@ -476,7 +484,7 @@ def _claude_call(system: str, user: str, max_tokens: int = 2400) -> dict | None:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=REPORT_MODEL,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
@@ -522,7 +530,7 @@ def _generate_patient_narrative(ctx: dict) -> dict:
         "}\n"
         "Do NOT include markdown fences. Return the JSON only."
     )
-    return _claude_call(system, user, max_tokens=2400) or {}
+    return _claude_call(system, user, max_tokens=3500) or {}
 
 
 def _generate_physician_narrative(ctx: dict) -> dict:
@@ -557,7 +565,7 @@ def _generate_physician_narrative(ctx: dict) -> dict:
         "Provide 4-6 intervention_targets ranked by predicted impact. Do NOT include "
         "markdown fences. Return the JSON only."
     )
-    return _claude_call(system, user, max_tokens=2400) or {}
+    return _claude_call(system, user, max_tokens=3500) or {}
 
 
 # ---------------------------------------------------------------------------

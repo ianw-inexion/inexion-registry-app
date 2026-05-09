@@ -1876,8 +1876,9 @@ with tabs[6]:
     st.caption(
         "Reports generate at the moment you click and reflect the current "
         "values in the input section. Narrative content is written by Claude "
-        "Haiku from the deterministic biomarker data; if the API key is "
-        "unavailable the report falls back to static templates so the "
-        "deliverable still ships. Both reports are INEXION-branded with the "
-        "registry logo, navy + gold palette, and standard disclaimers."
+        "Opus 4.6 from the deterministic biomarker data; this takes ~15-30 "
+        "seconds per report. If the API key is unavailable the report falls "
+        "back to static templates so the deliverable still ships. Both "
+        "reports are INEXION-branded with the registry logo, navy + gold "
+        "palette, and standard disclaimers."
     )
