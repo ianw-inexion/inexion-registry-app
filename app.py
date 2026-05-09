@@ -42,7 +42,7 @@ st.markdown(
         <div style='color:white;font-size:28px;font-weight:700;margin-top:4px;'>
             Longevity Data Registry</div>
         <div style='color:#C9CBD4;font-size:14px;margin-top:4px;'>
-            HORAL - Healthspan Outcomes Registry for Active Longevity &nbsp;-&nbsp; v{APP_VERSION}
+            INEXION Longevity Registry &nbsp;-&nbsp; v{APP_VERSION}
         </div>
     </div>
     """,
@@ -51,24 +51,6 @@ st.markdown(
 
 # Sidebar
 with st.sidebar:
-    st.markdown(f"**INEXION Registry**")
-    st.caption(f"v{APP_VERSION}")
-    st.markdown("---")
-    st.markdown(
-        "**Navigation**\n\n"
-        "- NHANES Explorer\n"
-        "- HRS Explorer\n"
-        "- MIDUS Explorer\n"
-        "- Market Intelligence\n"
-        "- Biological Age Calculator\n"
-        "- Normative Reference\n"
-        "- Intervention Simulator\n"
-        "- Research Workbench\n"
-        "- Dataset Catalog\n"
-        "- Variable Dictionary\n"
-        "- Admin"
-    )
-    st.markdown("---")
     st.caption("Prototype build - local auth, no PHI.")
 
 # Registry-wide stats
@@ -234,8 +216,11 @@ with left:
     )
 with right:
     st.markdown(
-        "**Biological Age Calculator** - enter any patient's 9 standard lab values "
-        "(or upload a PDF lab report) to compute PhenoAge and biological age delta.\n\n"
+        "**Patient Analysis** - upload a PDF lab report once (or enter values manually) "
+        "and explore the same patient across three views: PhenoAge biological age + "
+        "10-year mortality risk, normative percentile vs. the U.S. population for their "
+        "age-sex group, and intervention simulation showing which biomarker moves the "
+        "needle most.\n\n"
         "**Research Workbench** - no-code hypothesis testing across NHANES, HRS, and MIDUS. "
         "Partial correlations, OLS regression, and scatter plots.\n\n"
         "**Dataset Catalog** - full inventory of what's loaded, what's pending "
