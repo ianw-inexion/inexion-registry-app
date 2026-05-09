@@ -67,6 +67,14 @@ DEFAULTS = {
     "pa_waist":       98.7,
     "pa_sbp":         125.0,
     "pa_dbp":         70.0,
+    # Liver Age inputs (Tab 5)
+    "pa_tbili":       0.7,
+    "pa_total_protein": 7.2,
+    "pa_platelet":    251.0,
+    "pa_ldh":         134.0,
+    # Kidney Age inputs (Tab 6) - eGFR auto-computed
+    "pa_bun":         13.7,
+    "pa_uric_acid":   5.4,
     "pa_extract_msg": "",
     "pa_extract_ok":  False,
 }
@@ -122,7 +130,13 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         '  "bmi":         <float, kg/m^2>,\n'
         '  "waist":       <float, cm>,\n'
         '  "sbp":         <float, mmHg systolic>,\n'
-        '  "dbp":         <float, mmHg diastolic>\n'
+        '  "dbp":         <float, mmHg diastolic>,\n'
+        '  "tbili":         <float, mg/dL total bilirubin>,\n'
+        '  "total_protein": <float, g/dL total protein>,\n'
+        '  "platelet":      <float, x1000/uL platelet count>,\n'
+        '  "ldh":           <float, U/L lactate dehydrogenase>,\n'
+        '  "bun":           <float, mg/dL blood urea nitrogen>,\n'
+        '  "uric_acid":     <float, mg/dL>\n'
         "}\n\n"
         f"Lab report text:\n{lab_text}"
     )
@@ -167,6 +181,12 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         "waist":      ("pa_waist",      50.0, 200.0),
         "sbp":        ("pa_sbp",        80.0, 220.0),
         "dbp":        ("pa_dbp",        40.0, 130.0),
+        "tbili":         ("pa_tbili",         0.1,  10.0),
+        "total_protein": ("pa_total_protein", 4.0,  10.0),
+        "platelet":      ("pa_platelet",      50.0, 600.0),
+        "ldh":           ("pa_ldh",           50.0, 600.0),
+        "bun":           ("pa_bun",           3.0,  100.0),
+        "uric_acid":     ("pa_uric_acid",     1.5,  15.0),
     }
     found, missing = [], []
     for key, (state_key, lo, hi) in field_map.items():
@@ -272,6 +292,26 @@ with st.expander("Metabolic markers (for Metabolic Age tab) - optional", expande
         st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
         st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
 
+# Liver + Kidney markers - power Tabs 5 + 6
+with st.expander("Liver + Kidney markers (for Liver Age + Kidney Age tabs) - optional",
+                  expanded=False):
+    st.caption(
+        "Liver Age uses albumin + alkaline phosphatase (already in main panel above) "
+        "plus 4 markers below. Kidney Age uses creatinine (above) plus 2 markers "
+        "below; eGFR is auto-computed via CKD-EPI 2021. Defaults are NHANES "
+        "population means."
+    )
+    lk1, lk2, lk3 = st.columns(3)
+    with lk1:
+        st.number_input("Total bilirubin (mg/dL)",     min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
+        st.number_input("Total protein (g/dL)",        min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
+    with lk2:
+        st.number_input("Platelet count (x1000/uL)",   min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
+        st.number_input("LDH (U/L)",                   min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh")
+    with lk3:
+        st.number_input("BUN (mg/dL)",                 min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun")
+        st.number_input("Uric acid (mg/dL)",           min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid")
+
 age      = st.session_state["pa_age"]
 sex      = st.session_state["pa_sex"]
 albumin  = st.session_state["pa_albumin"]
@@ -291,6 +331,13 @@ bmi_pa       = st.session_state["pa_bmi"]
 waist_pa     = st.session_state["pa_waist"]
 sbp_pa       = st.session_state["pa_sbp"]
 dbp_pa       = st.session_state["pa_dbp"]
+# Liver + Kidney markers
+tbili_pa     = st.session_state["pa_tbili"]
+tprot_pa     = st.session_state["pa_total_protein"]
+plt_pa       = st.session_state["pa_platelet"]
+ldh_pa       = st.session_state["pa_ldh"]
+bun_pa       = st.session_state["pa_bun"]
+ua_pa        = st.session_state["pa_uric_acid"]
 
 pa_result = compute_phenoage(
     age=age, albumin_g_dl=albumin, creatinine_mg_dl=creatinine,
@@ -427,8 +474,141 @@ def bootstrap_metabolic(values_dict, n_boot=500, seed=42):
         "n_boot": n_boot,
     }
 
+@st.cache_data(show_spinner=False)
+def _load_organ_clock(name):
+    """Load any organ-clock fit dict from organ_clocks_params.json."""
+    from src.config import ORGAN_CLOCKS_PARAMS_PATH, IS_S3
+    import json
+    try:
+        if IS_S3:
+            import s3fs
+            fs = s3fs.S3FileSystem(anon=False)
+            with fs.open(str(ORGAN_CLOCKS_PARAMS_PATH).replace("s3://",""), "r") as f:
+                params = json.load(f)
+        else:
+            with open(ORGAN_CLOCKS_PARAMS_PATH, "r") as f:
+                params = json.load(f)
+        return params["clocks"].get(name)
+    except Exception:
+        return None
+
+_LIVER  = _load_organ_clock("nhanes_liver")
+_KIDNEY = _load_organ_clock("nhanes_kidney")
+
+_LIVER_REF_MEANS = {
+    "albumin": 4.21, "alkaline_phosphatase": 70.94,
+    "total_bilirubin": 0.67, "total_protein": 7.17,
+    "platelet": 251.25, "ldh": 133.62,
+}
+_LIVER_CV = {
+    "albumin": 0.025, "alkaline_phosphatase": 0.040,
+    "total_bilirubin": 0.050, "total_protein": 0.020,
+    "platelet": 0.040, "ldh": 0.040,
+}
+
+_KIDNEY_REF_MEANS = {
+    "creatinine": 0.91, "bun": 13.66, "uric_acid": 5.43, "egfr": 93.99,
+}
+_KIDNEY_CV = {
+    "creatinine": 0.030, "bun": 0.050, "uric_acid": 0.030, "egfr": 0.030,
+}
+
+def ckd_epi_2021(creatinine, age_yrs, sex_str):
+    """Race-free CKD-EPI 2021 eGFR for adults."""
+    fem = (sex_str == "Female")
+    kappa = 0.7 if fem else 0.9
+    alpha = -0.241 if fem else -0.302
+    sex_mult = 1.012 if fem else 1.0
+    cr_k = creatinine / kappa
+    return (
+        142.0
+        * (min(cr_k, 1.0) ** alpha)
+        * (max(cr_k, 1.0) ** -1.200)
+        * (0.9938 ** age_yrs)
+        * sex_mult
+    )
+
+def compute_liver_age(albumin, alkphos, tbili, tprot, plt, ldh):
+    if _LIVER is None or not _LIVER.get("fit_ok"):
+        return None
+    c = _LIVER["coefficients"]
+    return float(
+        _LIVER["intercept"]
+        + c["albumin"]              * albumin
+        + c["alkaline_phosphatase"] * alkphos
+        + c["total_bilirubin"]      * tbili
+        + c["total_protein"]        * tprot
+        + c["platelet"]             * plt
+        + c["ldh"]                  * ldh
+    )
+
+def liver_contributions(albumin, alkphos, tbili, tprot, plt, ldh):
+    if _LIVER is None or not _LIVER.get("fit_ok"):
+        return {}
+    c = _LIVER["coefficients"]
+    pat = {"albumin": albumin, "alkaline_phosphatase": alkphos,
+           "total_bilirubin": tbili, "total_protein": tprot,
+           "platelet": plt, "ldh": ldh}
+    label = {"albumin": "Albumin",
+              "alkaline_phosphatase": "Alkaline phosphatase",
+              "total_bilirubin": "Total bilirubin",
+              "total_protein": "Total protein",
+              "platelet": "Platelets", "ldh": "LDH"}
+    return {label[k]: c[k] * (pat[k] - _LIVER_REF_MEANS[k]) for k in pat}
+
+def bootstrap_liver(values, n_boot=400, seed=42):
+    rng = np.random.default_rng(seed)
+    advances = np.empty(n_boot, dtype=float)
+    keys = ["albumin", "alkaline_phosphatase", "total_bilirubin",
+            "total_protein", "platelet", "ldh"]
+    sigs = np.array([values[k] * _LIVER_CV[k] for k in keys])
+    for i in range(n_boot):
+        d = rng.normal(0, sigs)
+        v = compute_liver_age(*[values[k] + d[j] for j, k in enumerate(keys)])
+        advances[i] = (v - age) if v is not None else float("nan")
+    return {"advance_p50": float(np.percentile(advances, 50)),
+            "advance_lo": float(np.percentile(advances, 2.5)),
+            "advance_hi": float(np.percentile(advances, 97.5)),
+            "n_boot": n_boot}
+
+def compute_kidney_age(creatinine, bun, ua, egfr):
+    if _KIDNEY is None or not _KIDNEY.get("fit_ok"):
+        return None
+    c = _KIDNEY["coefficients"]
+    return float(
+        _KIDNEY["intercept"]
+        + c["creatinine"] * creatinine
+        + c["bun"]        * bun
+        + c["uric_acid"]  * ua
+        + c["egfr"]       * egfr
+    )
+
+def kidney_contributions(creatinine, bun, ua, egfr):
+    if _KIDNEY is None or not _KIDNEY.get("fit_ok"):
+        return {}
+    c = _KIDNEY["coefficients"]
+    pat = {"creatinine": creatinine, "bun": bun, "uric_acid": ua, "egfr": egfr}
+    label = {"creatinine": "Creatinine", "bun": "BUN",
+              "uric_acid": "Uric acid", "egfr": "eGFR (CKD-EPI)"}
+    return {label[k]: c[k] * (pat[k] - _KIDNEY_REF_MEANS[k]) for k in pat}
+
+def bootstrap_kidney(values, n_boot=400, seed=42):
+    rng = np.random.default_rng(seed)
+    advances = np.empty(n_boot, dtype=float)
+    keys = ["creatinine", "bun", "uric_acid", "egfr"]
+    sigs = np.array([values[k] * _KIDNEY_CV[k] for k in keys])
+    for i in range(n_boot):
+        d = rng.normal(0, sigs)
+        v = compute_kidney_age(*[values[k] + d[j] for j, k in enumerate(keys)])
+        advances[i] = (v - age) if v is not None else float("nan")
+    return {"advance_p50": float(np.percentile(advances, 50)),
+            "advance_lo": float(np.percentile(advances, 2.5)),
+            "advance_hi": float(np.percentile(advances, 97.5)),
+            "n_boot": n_boot}
+
 tabs = st.tabs(["Biological Age (PhenoAge)", "Normative Reference",
-                "PhenoAge Intervention", "Metabolic Age"])
+                "PhenoAge Intervention", "Metabolic Age",
+                "Liver Age", "Kidney Age"])
 
 # TAB 1 - BIOLOGICAL AGE
 with tabs[0]:
@@ -977,7 +1157,6 @@ with tabs[3]:
             unsafe_allow_html=True,
         )
 
-        # Contribution waterfall
         st.markdown("##### Marker contributions to metabolic-age advance")
         st.caption(
             "Each bar = coefficient * (patient value - NHANES population mean) "
@@ -1005,7 +1184,6 @@ with tabs[3]:
         )
         st.plotly_chart(fig, use_container_width=True, key='pa_metab_contrib')
 
-        # What-if simulator
         st.markdown("##### Simulate intervention")
         st.caption(
             "Sliders default to current values. Move them to see how the metabolic "
@@ -1058,7 +1236,6 @@ with tabs[3]:
             unsafe_allow_html=True,
         )
 
-        # Dual-CI plot
         m_fig_ci = go.Figure()
         m_fig_ci.add_trace(go.Scatter(
             x=[m_ci['advance_lo'], m_ci['advance_hi']], y=[1, 1],
@@ -1078,7 +1255,7 @@ with tabs[3]:
             showlegend=False))
         m_fig_ci.add_vline(x=0, line_dash='dash', line_color='gray',
                             annotation_text='No advance', annotation_position='top')
-        m_no_overlap = (m_sim_ci['advance_hi'] < m_ci['advance_lo']) or                        (m_sim_ci['advance_lo'] > m_ci['advance_hi'])
+        m_no_overlap = (m_sim_ci['advance_hi'] < m_ci['advance_lo']) or (m_sim_ci['advance_lo'] > m_ci['advance_hi'])
         m_verdict = ("Simulated CI does NOT overlap baseline CI - change exceeds lab noise."
                       if m_no_overlap else
                       "Simulated CI overlaps baseline CI - change is within lab noise.")
@@ -1110,4 +1287,233 @@ with tabs[3]:
             "age is incorrect clinically; the model captures statistical age-pattern "
             "matching, not health-outcome optimization. Use it for understanding "
             "how a patient's metabolic profile compares to age peers."
+        )
+
+
+# =============================================================================
+# TAB 5 - LIVER AGE
+# =============================================================================
+with tabs[4]:
+    if _LIVER is None or not _LIVER.get("fit_ok"):
+        st.warning("Liver clock coefficients not loaded.")
+    else:
+        l_age = compute_liver_age(albumin, alkphos, tbili_pa, tprot_pa, plt_pa, ldh_pa)
+        l_advance = l_age - age
+        l_color = TEAL if l_advance <= 0 else CORAL
+        l_label = "biologically younger" if l_advance <= 0 else "biologically older"
+
+        l_ci = bootstrap_liver({
+            "albumin": albumin, "alkaline_phosphatase": alkphos,
+            "total_bilirubin": tbili_pa, "total_protein": tprot_pa,
+            "platelet": plt_pa, "ldh": ldh_pa,
+        }, n_boot=400)
+
+        st.markdown(
+            f"""
+            <div style='background:{NAVY}; color:white; padding:28px;
+                        border-radius:10px; text-align:center; margin-top:8px;'>
+                <div style='color:{GOLD}; font-size:12px; letter-spacing:2px;
+                            text-transform:uppercase;'>Liver Age (NHANES-trained, synthetic-function panel)</div>
+                <div style='font-size:56px; font-weight:800; margin-top:6px;'>
+                    {l_age:.1f} <span style='color:{GOLD}; font-size:28px;'>years</span>
+                </div>
+                <div style='font-size:18px; color:{l_color}; margin-top:8px; font-weight:600;'>
+                    {l_advance:+.1f} years - {l_label} than chronological age
+                </div>
+                <div style='font-size:14px; color:#C9CBD4; margin-top:4px;'>
+                    95% CI on advance: [{l_ci['advance_lo']:+.1f}, {l_ci['advance_hi']:+.1f}] years &nbsp;-&nbsp; bootstrap n={l_ci['n_boot']}
+                </div>
+                <div style='font-size:13px; color:#C9CBD4; margin-top:14px;'>
+                    Phase 4 NHANES-trained liver clock. R^2={_LIVER['r2']:.3f}, age-adjusted Cox HR=1.081/yr advance, C-index=0.849.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("##### Marker contributions to liver-age advance")
+        l_contribs = liver_contributions(albumin, alkphos, tbili_pa, tprot_pa, plt_pa, ldh_pa)
+        ldf = pd.DataFrame([{"Marker": k, "Contribution (yrs)": v}
+                             for k, v in sorted(l_contribs.items(), key=lambda x: x[1], reverse=True)])
+        l_colors = [CORAL if v > 0 else TEAL for v in ldf["Contribution (yrs)"]]
+        l_fig = go.Figure(go.Bar(
+            x=ldf["Contribution (yrs)"], y=ldf["Marker"], orientation='h',
+            marker_color=l_colors,
+            text=[f"{v:+.2f}" for v in ldf["Contribution (yrs)"]], textposition='outside',
+        ))
+        l_fig.add_vline(x=0, line_color='gray', line_width=1)
+        l_fig.update_layout(xaxis_title='Contribution to liver-age advance (years)',
+                            plot_bgcolor='white', paper_bgcolor='white',
+                            font_color='#1A1A2E', height=320,
+                            margin=dict(l=160, t=10, b=40, r=20))
+        st.plotly_chart(l_fig, use_container_width=True, key='pa_liver_contrib')
+
+        st.markdown("##### Simulate intervention")
+        lsig = (albumin, alkphos, tbili_pa, tprot_pa, plt_pa, ldh_pa)
+        if st.session_state.get("pa_liver_baseline_sig") != lsig:
+            st.session_state["pa_liver_baseline_sig"] = lsig
+            for k, v in zip(("ls_alb","ls_alp","ls_tb","ls_tp","ls_plt","ls_ldh"), lsig):
+                st.session_state[k] = float(v)
+        l1, l2, l3 = st.columns(3)
+        with l1:
+            sim_alb = st.slider("Albumin (g/dL)",            2.5, 6.0,  step=0.1, key="ls_alb")
+            sim_alp = st.slider("Alkaline phosphatase (U/L)", 20.0, 400.0, step=1.0, key="ls_alp")
+        with l2:
+            sim_tb = st.slider("Total bilirubin (mg/dL)",    0.1, 5.0,  step=0.05, key="ls_tb")
+            sim_tp = st.slider("Total protein (g/dL)",       4.0, 10.0, step=0.1, key="ls_tp")
+        with l3:
+            sim_plt = st.slider("Platelets (x1000/uL)",      50.0, 600.0, step=1.0, key="ls_plt")
+            sim_ldh = st.slider("LDH (U/L)",                 50.0, 400.0, step=1.0, key="ls_ldh")
+
+        l_sim_age = compute_liver_age(sim_alb, sim_alp, sim_tb, sim_tp, sim_plt, sim_ldh)
+        l_sim_advance = l_sim_age - age
+        l_change = l_advance - l_sim_advance
+        ls_color = TEAL if l_change > 0 else CORAL
+        sign_l = "-" if l_change > 0 else "+"
+        l_sim_ci = bootstrap_liver({
+            "albumin": sim_alb, "alkaline_phosphatase": sim_alp,
+            "total_bilirubin": sim_tb, "total_protein": sim_tp,
+            "platelet": sim_plt, "ldh": sim_ldh,
+        }, n_boot=300)
+
+        st.markdown(
+            f"<div style='background:#F2F4F8;border-left:4px solid {ls_color};"
+            f"padding:16px 20px;border-radius:4px;margin:16px 0;'>"
+            f"<div style='font-size:14px;color:#1A1A2E;'>"
+            f"<strong>Simulated liver age advance:</strong> "
+            f"<span style='color:{ls_color};font-size:20px;font-weight:700;'>{l_sim_advance:+.1f} years</span>"
+            f"&nbsp;<span style='color:#6B7280;font-size:13px;'>"
+            f"[CI {l_sim_ci['advance_lo']:+.1f}, {l_sim_ci['advance_hi']:+.1f}]</span>"
+            f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+            f"<strong>Change from baseline:</strong> "
+            f"<span style='color:{ls_color};font-size:20px;font-weight:700;'>{sign_l}{abs(l_change):.1f} years</span>"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        st.caption(
+            "**Methodology note.** Liver Age R^2 is only 0.06 - this clock is a "
+            "weak fit, because the NHANES parquet does not yet include ALT / AST / "
+            "GGT (the canonical hepatocellular-injury enzymes). What's here is "
+            "albumin + alkaline phosphatase + total bilirubin + total protein + "
+            "platelets + LDH - a synthetic-function and clearance panel rather "
+            "than an injury panel. The clock still validates against mortality "
+            "(HR=1.081/yr advance, C=0.849), but treat individual patient "
+            "scores as exploratory until the injury enzymes are ingested into "
+            "the NHANES pipeline."
+        )
+
+
+# =============================================================================
+# TAB 6 - KIDNEY AGE
+# =============================================================================
+with tabs[5]:
+    if _KIDNEY is None or not _KIDNEY.get("fit_ok"):
+        st.warning("Kidney clock coefficients not loaded.")
+    else:
+        egfr_pa = ckd_epi_2021(creatinine, age, sex)
+        k_age = compute_kidney_age(creatinine, bun_pa, ua_pa, egfr_pa)
+        k_advance = k_age - age
+        k_color = TEAL if k_advance <= 0 else CORAL
+        k_label = "biologically younger" if k_advance <= 0 else "biologically older"
+
+        k_ci = bootstrap_kidney({
+            "creatinine": creatinine, "bun": bun_pa,
+            "uric_acid": ua_pa, "egfr": egfr_pa,
+        }, n_boot=400)
+
+        st.markdown(
+            f"""
+            <div style='background:{NAVY}; color:white; padding:28px;
+                        border-radius:10px; text-align:center; margin-top:8px;'>
+                <div style='color:{GOLD}; font-size:12px; letter-spacing:2px;
+                            text-transform:uppercase;'>Kidney Age (NHANES-trained, CKD-EPI 2021 eGFR)</div>
+                <div style='font-size:56px; font-weight:800; margin-top:6px;'>
+                    {k_age:.1f} <span style='color:{GOLD}; font-size:28px;'>years</span>
+                </div>
+                <div style='font-size:18px; color:{k_color}; margin-top:8px; font-weight:600;'>
+                    {k_advance:+.1f} years - {k_label} than chronological age
+                </div>
+                <div style='font-size:14px; color:#C9CBD4; margin-top:4px;'>
+                    95% CI on advance: [{k_ci['advance_lo']:+.1f}, {k_ci['advance_hi']:+.1f}] years &nbsp;-&nbsp; bootstrap n={k_ci['n_boot']}
+                </div>
+                <div style='font-size:13px; color:#C9CBD4; margin-top:14px;'>
+                    Phase 4 NHANES-trained kidney clock. R^2={_KIDNEY['r2']:.3f}, age-adjusted Cox HR=1.018/yr advance, C-index=0.842.
+                    Computed eGFR (CKD-EPI 2021): {egfr_pa:.1f} mL/min/1.73m^2.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("##### Marker contributions to kidney-age advance")
+        k_contribs = kidney_contributions(creatinine, bun_pa, ua_pa, egfr_pa)
+        kdf = pd.DataFrame([{"Marker": k, "Contribution (yrs)": v}
+                             for k, v in sorted(k_contribs.items(), key=lambda x: x[1], reverse=True)])
+        k_colors = [CORAL if v > 0 else TEAL for v in kdf["Contribution (yrs)"]]
+        k_fig = go.Figure(go.Bar(
+            x=kdf["Contribution (yrs)"], y=kdf["Marker"], orientation='h',
+            marker_color=k_colors,
+            text=[f"{v:+.2f}" for v in kdf["Contribution (yrs)"]], textposition='outside',
+        ))
+        k_fig.add_vline(x=0, line_color='gray', line_width=1)
+        k_fig.update_layout(xaxis_title='Contribution to kidney-age advance (years)',
+                            plot_bgcolor='white', paper_bgcolor='white',
+                            font_color='#1A1A2E', height=300,
+                            margin=dict(l=160, t=10, b=40, r=20))
+        st.plotly_chart(k_fig, use_container_width=True, key='pa_kidney_contrib')
+
+        st.markdown("##### Simulate intervention")
+        st.caption(
+            "Adjust creatinine, BUN, or uric acid. eGFR is auto-recomputed via "
+            "CKD-EPI 2021 from the simulated creatinine + the patient's age and sex."
+        )
+        ksig = (creatinine, bun_pa, ua_pa)
+        if st.session_state.get("pa_kidney_baseline_sig") != ksig:
+            st.session_state["pa_kidney_baseline_sig"] = ksig
+            for k, v in zip(("ks_cre","ks_bun","ks_ua"), ksig):
+                st.session_state[k] = float(v)
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            sim_cre = st.slider("Creatinine (mg/dL)", 0.4, 5.0, step=0.05, key="ks_cre")
+        with k2:
+            sim_bun = st.slider("BUN (mg/dL)",         3.0, 80.0, step=0.5, key="ks_bun")
+        with k3:
+            sim_ua  = st.slider("Uric acid (mg/dL)",   1.5, 14.0, step=0.1, key="ks_ua")
+
+        sim_egfr = ckd_epi_2021(sim_cre, age, sex)
+        k_sim_age = compute_kidney_age(sim_cre, sim_bun, sim_ua, sim_egfr)
+        k_sim_advance = k_sim_age - age
+        k_change = k_advance - k_sim_advance
+        ks_color = TEAL if k_change > 0 else CORAL
+        sign_k = "-" if k_change > 0 else "+"
+        k_sim_ci = bootstrap_kidney({
+            "creatinine": sim_cre, "bun": sim_bun,
+            "uric_acid": sim_ua, "egfr": sim_egfr,
+        }, n_boot=300)
+
+        st.markdown(
+            f"<div style='background:#F2F4F8;border-left:4px solid {ks_color};"
+            f"padding:16px 20px;border-radius:4px;margin:16px 0;'>"
+            f"<div style='font-size:14px;color:#1A1A2E;'>"
+            f"<strong>Simulated kidney age advance:</strong> "
+            f"<span style='color:{ks_color};font-size:20px;font-weight:700;'>{k_sim_advance:+.1f} years</span>"
+            f"&nbsp;<span style='color:#6B7280;font-size:13px;'>"
+            f"[CI {k_sim_ci['advance_lo']:+.1f}, {k_sim_ci['advance_hi']:+.1f}]</span>"
+            f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+            f"<strong>Change from baseline:</strong> "
+            f"<span style='color:{ks_color};font-size:20px;font-weight:700;'>{sign_k}{abs(k_change):.1f} years</span>"
+            f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+            f"<span style='color:#6B7280;font-size:13px;'>simulated eGFR: {sim_egfr:.1f}</span>"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        st.caption(
+            "**Methodology note.** Kidney Age R^2 = 0.40 - the strongest within-cohort "
+            "fit of the four organ clocks, because creatinine and eGFR track age tightly. "
+            "Note that creatinine and eGFR are deterministic functions of each other "
+            "(plus age + sex), so the marginal coefficients on each look counter-intuitive "
+            "in isolation. The contribution waterfall reflects multivariate fit, not "
+            "individual marker effects. Cox HR=1.018/yr advance, C=0.842."
         )
