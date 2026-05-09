@@ -1,5 +1,5 @@
 """
-Cohort Builder — point-and-click filters over NHANES, live count,
+Cohort Builder - point-and-click filters over NHANES, live count,
 descriptive summary, visualizations, CSV export.
 """
 import streamlit as st
@@ -13,11 +13,24 @@ from src.schema import (
 )
 
 
-st.set_page_config(page_title="Cohort Builder — INEXION Registry", layout="wide")
+st.set_page_config(page_title="Cohort Builder - INEXION Registry", layout="wide")
 st.title("Cohort Builder")
 st.caption("Filter the NHANES harmonized dataset. All counts are live.")
 
-# ── Build the filter UI ──────────────────────────────────────────────────────
+
+def _fmt(v, spec, suffix=""):
+    """Safe float formatter - returns em-dash if v is None/NaN/non-numeric."""
+    try:
+        if v is None:
+            return "-"
+        f = float(v)
+        if f != f:
+            return "-"
+        return f"{f:{spec}}{suffix}"
+    except (TypeError, ValueError):
+        return "-"
+
+
 with st.sidebar:
     st.markdown("### Filters")
 
@@ -41,7 +54,7 @@ with st.sidebar:
     st.markdown("**Biomarker filters** (optional)")
 
     featured = [
-        ("bmi", "BMI (kg/m²)", 12.0, 70.0, (12.0, 70.0)),
+        ("bmi", "BMI (kg/m^2)", 12.0, 70.0, (12.0, 70.0)),
         ("systolic_mean", "Systolic BP (mmHg)", 70, 220, (70, 220)),
         ("hba1c", "HbA1c (%)", 3.5, 18.0, (3.5, 18.0)),
         ("crp", "CRP (mg/L)", 0.0, 200.0, (0.0, 200.0)),
@@ -67,7 +80,6 @@ with st.sidebar:
         ),
     )
 
-# ── Compose the filter dict ──────────────────────────────────────────────────
 filters = {"cycle": cycles, "age": (age_min, age_max)}
 
 sex_map_inv = {v: k for k, v in SEX_LABELS.items()}
@@ -79,7 +91,6 @@ if race_pick and len(race_pick) < len(RACE_LABELS):
 
 filters.update(bio_filters)
 
-# ── Render results ───────────────────────────────────────────────────────────
 n = data.cohort_count(filters)
 total = data.dataset_stats()["n_total"]
 pct = (n / total * 100) if total else 0
@@ -98,31 +109,32 @@ if n == 0:
     st.warning("No participants match these filters. Loosen some ranges.")
     st.stop()
 
-# Summary table
-est_label = "survey-weighted (population)" if use_weights else "unweighted (sample)"
-st.markdown(f"### Descriptive summary  ·  *{est_label}*")
 summary = data.cohort_summary(filters, weighted=use_weights)
-if use_weights and summary.get("effective_n"):
+est = summary.get("estimator", "unweighted")
+est_label = ("survey-weighted (population)" if est == "weighted"
+             else "unweighted (sample)" if est == "unweighted"
+             else "unweighted (fallback - weighted query failed)")
+st.markdown(f"### Descriptive summary  -  *{est_label}*")
+eff_n = summary.get("effective_n")
+if est == "weighted" and eff_n is not None:
     st.caption(
-        f"Effective n (Kish): {summary['effective_n']:,.0f}  ·  "
-        "Means use NHANES exam weights — flip the toggle to compare against raw sample averages."
+        f"Effective n (Kish): {eff_n:,.0f}  -  "
+        "Means use NHANES exam weights - flip the toggle to compare against raw sample averages."
     )
 
 sc1, sc2, sc3, sc4 = st.columns(4)
-sc1.metric("Mean age", f"{summary['mean_age']:.1f}")
-sc2.metric("% female", f"{summary['pct_female']*100:.0f}%" if summary['pct_female'] else "—")
-sc3.metric("Mean BMI", f"{summary['mean_bmi']:.1f}" if summary['mean_bmi'] else "—")
-sc4.metric("Mean PhenoAge Δ",
-           f"{summary['mean_phenoage_delta']:+.2f} yr"
-           if summary['mean_phenoage_delta'] is not None else "—")
+sc1.metric("Mean age",  _fmt(summary.get('mean_age'),  '.1f'))
+pctf = summary.get('pct_female')
+sc2.metric("% female",  _fmt(pctf * 100 if pctf is not None else None, '.0f', '%'))
+sc3.metric("Mean BMI",  _fmt(summary.get('mean_bmi'),  '.1f'))
+sc4.metric("Mean PhenoAge delta", _fmt(summary.get('mean_phenoage_delta'), '+.2f', ' yr'))
 
 bc1, bc2, bc3, bc4 = st.columns(4)
-bc1.metric("Mean systolic", f"{summary['mean_systolic']:.0f}" if summary['mean_systolic'] else "—")
-bc2.metric("Mean glucose", f"{summary['mean_glucose']:.0f}" if summary['mean_glucose'] else "—")
-bc3.metric("Mean CRP", f"{summary['mean_crp']:.2f}" if summary['mean_crp'] else "—")
-bc4.metric("Mean HbA1c", f"{summary['mean_hba1c']:.1f}" if summary['mean_hba1c'] else "—")
+bc1.metric("Mean systolic", _fmt(summary.get('mean_systolic'), '.0f'))
+bc2.metric("Mean glucose",  _fmt(summary.get('mean_glucose'),  '.0f'))
+bc3.metric("Mean CRP",      _fmt(summary.get('mean_crp'),      '.2f'))
+bc4.metric("Mean HbA1c",    _fmt(summary.get('mean_hba1c'),    '.1f'))
 
-# ── Distributions ────────────────────────────────────────────────────────────
 st.markdown("### Distribution")
 plot_col = st.selectbox(
     "Variable",
@@ -144,7 +156,6 @@ if len(dist):
     )
     st.plotly_chart(fig, width='stretch')
 
-# ── Trend over NHANES cycles ─────────────────────────────────────────────────
 st.markdown("### Trend over NHANES cycles")
 trend_col = st.selectbox(
     "Variable for cycle trend",
@@ -168,7 +179,6 @@ if len(trend):
     )
     st.plotly_chart(fig, width='stretch')
 
-# ── Preview + export ─────────────────────────────────────────────────────────
 st.markdown("### Preview")
 preview = data.cohort_preview(filters, limit=500)
 st.dataframe(preview, width='stretch', height=320)
