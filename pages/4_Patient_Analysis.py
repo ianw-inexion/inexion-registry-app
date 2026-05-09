@@ -205,9 +205,9 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
             missing.append(key)
 
     if found:
-        msg = f"Extracted {len(found)}/9 values: {', '.join(found)}."
+        msg = f"Extracted {len(found)}/{len(field_map)} lab values: {', '.join(found)}."
         if missing:
-            msg += f" Not found: {', '.join(missing)}. Enter these manually."
+            msg += f" Not found in report: {', '.join(missing)}. Enter these manually below."
         return {"message": msg, "ok": True}
     return {"message": "No biomarker values could be extracted.", "ok": False}
 
@@ -232,9 +232,14 @@ with st.expander("Upload lab report to auto-populate values", expanded=False):
             st.warning(st.session_state["pa_extract_msg"])
 
 st.markdown("### Patient Inputs")
-st.caption(
-    "These values flow into all three tabs below. "
-    "Enter or upload once - explore everywhere."
+
+# Boxed alert flagging the manual-entry-required fields. These three fields
+# are demographics and are NOT extracted from the lab PDF, so the user has
+# to enter them every time even if they uploaded a complete lab report.
+st.info(
+    "**Demographics below (Age, Sex, Race / Ethnicity) are not extracted from "
+    "lab reports — please enter these manually.** All lab values further down "
+    "auto-populate from a PDF upload (above), or you can edit any value directly."
 )
 
 RACE_OPTIONS = ["Non-Hispanic White", "Non-Hispanic Black",
@@ -251,66 +256,54 @@ RACE_TO_NHANES = {
 if "pa_race" not in st.session_state:
     st.session_state["pa_race"] = "Non-Hispanic White"
 
-dcol, _ = st.columns([1, 2])
-with dcol:
+st.markdown("#### Demographics")
+dc1, dc2, dc3 = st.columns(3)
+with dc1:
     st.number_input("Age (years)", min_value=18, max_value=100, step=1, key="pa_age")
+with dc2:
     st.selectbox("Sex", ["Male", "Female"], key="pa_sex",
                  help="Used for normative reference percentile stratification.")
+with dc3:
     st.selectbox("Race / Ethnicity", RACE_OPTIONS, key="pa_race",
                  help="Used for matched-cohort reference. 'Prefer not to say' "
                       "falls back to age x sex matching.")
 
-c1, c2, c3 = st.columns(3)
-with c1:
+st.markdown("#### Lab Values")
+st.caption(
+    "Auto-populated from PDF upload above. Defaults are NHANES population means "
+    "until you extract or override. All values feed the analyses in the tabs below."
+)
+
+# All 22 lab values in a single 4-column grid. Grouped clinically (chem panel,
+# CBC + inflammation, lipid + metabolic, liver enzymes + vitals) but rendered
+# as one continuous section without subheaders or expanders.
+lc1, lc2, lc3, lc4 = st.columns(4)
+with lc1:
     st.number_input("Albumin (g/dL)",             min_value=2.5,  max_value=6.0,   step=0.1, key="pa_albumin")
     st.number_input("Creatinine (mg/dL)",         min_value=0.3,  max_value=5.0,   step=0.1, key="pa_creatinine")
     st.number_input("Glucose (mg/dL)",            min_value=50.0, max_value=400.0, step=1.0, key="pa_glucose")
-with c2:
+    st.number_input("BUN (mg/dL)",                min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun")
+    st.number_input("Uric acid (mg/dL)",          min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid")
+    st.number_input("Total bilirubin (mg/dL)",    min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
+with lc2:
     st.number_input("CRP (mg/L)",                 min_value=0.01, max_value=50.0,  step=0.1, key="pa_crp")
     st.number_input("Lymphocyte %",               min_value=5.0,  max_value=80.0,  step=0.5, key="pa_lymph")
-    st.number_input("MCV (fL)",                   min_value=70.0, max_value=110.0, step=0.5, key="pa_mcv")
-with c3:
-    st.number_input("RDW (%)",                    min_value=10.0, max_value=25.0,  step=0.1, key="pa_rdw")
-    st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
     st.number_input("WBC (x1000/uL)",             min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc")
-
-# Optional metabolic markers - power the Metabolic Age tab
-with st.expander("Metabolic markers (for Metabolic Age tab) - optional", expanded=False):
-    st.caption(
-        "These 7 markers feed the Metabolic Age tab. Values default to NHANES "
-        "population means; pre-filled automatically if extracted from a lab PDF."
-    )
-    mc1, mc2, mc3 = st.columns(3)
-    with mc1:
-        st.number_input("HbA1c (%)",                  min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c")
-        st.number_input("Total cholesterol (mg/dL)",  min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol")
-        st.number_input("HDL (mg/dL)",                min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl")
-    with mc2:
-        st.number_input("BMI (kg/m^2)",               min_value=15.0, max_value=70.0,  step=0.1, key="pa_bmi")
-        st.number_input("Waist circumference (cm)",   min_value=50.0, max_value=200.0, step=0.5, key="pa_waist")
-    with mc3:
-        st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
-        st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
-
-# Liver + Kidney markers - power Tabs 5 + 6
-with st.expander("Liver + Kidney markers (for Liver Age + Kidney Age tabs) - optional",
-                  expanded=False):
-    st.caption(
-        "Liver Age uses albumin + alkaline phosphatase (already in main panel above) "
-        "plus 4 markers below. Kidney Age uses creatinine (above) plus 2 markers "
-        "below; eGFR is auto-computed via CKD-EPI 2021. Defaults are NHANES "
-        "population means."
-    )
-    lk1, lk2, lk3 = st.columns(3)
-    with lk1:
-        st.number_input("Total bilirubin (mg/dL)",     min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
-        st.number_input("Total protein (g/dL)",        min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
-    with lk2:
-        st.number_input("Platelet count (x1000/uL)",   min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
-        st.number_input("LDH (U/L)",                   min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh")
-    with lk3:
-        st.number_input("BUN (mg/dL)",                 min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun")
-        st.number_input("Uric acid (mg/dL)",           min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid")
+    st.number_input("MCV (fL)",                   min_value=70.0, max_value=110.0, step=0.5, key="pa_mcv")
+    st.number_input("RDW (%)",                    min_value=10.0, max_value=25.0,  step=0.1, key="pa_rdw")
+    st.number_input("Platelet count (x1000/uL)",  min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
+with lc3:
+    st.number_input("HbA1c (%)",                  min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c")
+    st.number_input("Total cholesterol (mg/dL)",  min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol")
+    st.number_input("HDL (mg/dL)",                min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl")
+    st.number_input("BMI (kg/m^2)",               min_value=15.0, max_value=70.0,  step=0.1, key="pa_bmi")
+    st.number_input("Waist circumference (cm)",   min_value=50.0, max_value=200.0, step=0.5, key="pa_waist")
+with lc4:
+    st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
+    st.number_input("Total protein (g/dL)",       min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
+    st.number_input("LDH (U/L)",                  min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh")
+    st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
+    st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
 
 age      = st.session_state["pa_age"]
 sex      = st.session_state["pa_sex"]
