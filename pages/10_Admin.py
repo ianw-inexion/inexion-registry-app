@@ -169,6 +169,7 @@ PAGES = [
     ("3. MIDUS Explorer",             "3 biomarker waves (2004-2022, n=2,865) + M3 cognitive (n=3,291) - 9-marker inflammation panel - Cardiometabolic - Neuroendocrine - KDM bioage - Wave comparison"),
     ("3. Market Intelligence",        "BRFSS 2024 state and metro longevity market scoring (n=457,670)"),
     ("4. Patient Analysis",           "Single lab upload (or manual entry) feeds 3 tabs: Biological Age (PhenoAge + 10-yr mortality), Normative Reference (percentile vs. NHANES age-sex), Intervention Simulator (biomarker contributions + what-if sliders)"),
+    ("5. Validation",                 "Cox PH + Kaplan-Meier + concordance index for every clock against linked mortality - NHANES PhenoAge, HRS VBS PhenoAge, MIDUS KDM, and HRS clock head-to-head (PhenoAge vs GrimAge2 vs DunedinPACE)"),
     ("7. Research Workbench",         "No-code hypothesis testing - Partial correlations - OLS regression - Scatter plots - NHANES + HRS + MIDUS"),
     ("8. Dataset Catalog",            "Full inventory of all loaded, pending, and incoming datasets with access details"),
     ("9. Variable Dictionary",        "Definitions, units, and groupings for all registry variables"),

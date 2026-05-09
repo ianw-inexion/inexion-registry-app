@@ -176,13 +176,17 @@ def load_midus():
     bio = pd.read_parquet(MIDUS_BIO_PARQUET)
     # Coerce sex to numeric for OLS-friendliness (M=1, F=2 to match other sheets)
     bio['sex'] = bio['sex'].map({'M': 1, 'F': 2})
+    # Coerce merge key to plain object string regardless of dtype the parquet was written with
+    if 'midus_id' in bio.columns:
+        bio['midus_id'] = bio['midus_id'].astype(str)
     if data_exists(MIDUS_COG_PARQUET):
         cog = pd.read_parquet(MIDUS_COG_PARQUET)
-        # Subset cognitive columns only; merge by midus_id (M3 wave overlap only)
         cog_cols = ['midus_id','wordlist_total_unique','wordlist_total_repeats',
                     'digit_span_back_score','category_fluency_unique',
-                    'number_series_first_pass']
-        cog = cog[[c for c in cog_cols if c in cog.columns]]
+                    'number_series_total','number_series_first_pass']
+        cog = cog[[c for c in cog_cols if c in cog.columns]].copy()
+        if 'midus_id' in cog.columns:
+            cog['midus_id'] = cog['midus_id'].astype(str)
         bio = bio.merge(cog, on='midus_id', how='left')
     return bio
 
