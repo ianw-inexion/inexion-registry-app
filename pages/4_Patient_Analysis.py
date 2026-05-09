@@ -50,6 +50,13 @@ st.markdown(
 DEFAULTS = {
     "pa_age":         50,
     "pa_sex":         "Male",
+    # Patient-entered anthropometrics. BMI is derived from height + weight; waist
+    # is shown in inches in the UI but converted to cm for the metabolic clock.
+    "pa_height_in":   67.0,   # 5'7" matches NHANES adult mean
+    "pa_weight_lb":   185.0,  # gives BMI ~28.97, matches NHANES population mean
+    "pa_waist_in":    38.85,  # = 98.7 cm NHANES mean / 2.54
+    "pa_bmi":         28.9,   # auto-computed each render; default seeds first paint
+    "pa_waist":       98.7,   # cm value used by metabolic clock; auto-set from waist_in
     "pa_albumin":     4.3,
     "pa_creatinine":  0.9,
     "pa_glucose":     95.0,
@@ -63,8 +70,6 @@ DEFAULTS = {
     "pa_hba1c":       5.7,
     "pa_total_chol":  196.0,
     "pa_hdl":         53.0,
-    "pa_bmi":         28.9,
-    "pa_waist":       98.7,
     "pa_sbp":         125.0,
     "pa_dbp":         70.0,
     # Liver Age inputs (Tab 5)
@@ -127,8 +132,6 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         '  "hba1c":       <float, percent (e.g. 5.7)>,\n'
         '  "total_chol":  <float, mg/dL>,\n'
         '  "hdl":         <float, mg/dL>,\n'
-        '  "bmi":         <float, kg/m^2>,\n'
-        '  "waist":       <float, cm>,\n'
         '  "sbp":         <float, mmHg systolic>,\n'
         '  "dbp":         <float, mmHg diastolic>,\n'
         '  "tbili":         <float, mg/dL total bilirubin>,\n'
@@ -177,8 +180,6 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         "hba1c":      ("pa_hba1c",      3.5,  18.0),
         "total_chol": ("pa_total_chol", 80.0, 400.0),
         "hdl":        ("pa_hdl",        15.0, 150.0),
-        "bmi":        ("pa_bmi",        15.0, 70.0),
-        "waist":      ("pa_waist",      50.0, 200.0),
         "sbp":        ("pa_sbp",        80.0, 220.0),
         "dbp":        ("pa_dbp",        40.0, 130.0),
         "tbili":         ("pa_tbili",         0.1,  10.0),
@@ -233,12 +234,13 @@ with st.expander("Upload lab report to auto-populate values", expanded=False):
 
 st.markdown("### Patient Inputs")
 
-# Boxed alert flagging the manual-entry-required fields. These three fields
-# are demographics and are NOT extracted from the lab PDF, so the user has
-# to enter them every time even if they uploaded a complete lab report.
+# Boxed alert flagging the manual-entry-required fields. These are demographics
+# and patient-measured anthropometrics — they are NOT in a lab report, so the
+# user has to enter them every time even if they uploaded a complete PDF.
 st.info(
-    "**Demographics below (Age, Sex, Race / Ethnicity) are not extracted from "
-    "lab reports — please enter these manually.** All lab values further down "
+    "**Patient-entered values below (Age, Sex, Race / Ethnicity, Height, Weight, "
+    "Waist) are not extracted from lab reports — please enter these manually.** "
+    "BMI is auto-calculated from height and weight. All lab values further down "
     "auto-populate from a PDF upload (above), or you can edit any value directly."
 )
 
@@ -256,7 +258,9 @@ RACE_TO_NHANES = {
 if "pa_race" not in st.session_state:
     st.session_state["pa_race"] = "Non-Hispanic White"
 
-st.markdown("#### Demographics")
+st.markdown("#### Patient-Entered Values")
+
+# Demographics row
 dc1, dc2, dc3 = st.columns(3)
 with dc1:
     st.number_input("Age (years)", min_value=18, max_value=100, step=1, key="pa_age")
@@ -268,15 +272,43 @@ with dc3:
                  help="Used for matched-cohort reference. 'Prefer not to say' "
                       "falls back to age x sex matching.")
 
+# Anthropometrics row - height/weight/waist in US units; BMI is computed
+mc1, mc2, mc3, mc4 = st.columns(4)
+with mc1:
+    st.number_input("Height (in)", min_value=48.0, max_value=84.0, step=0.5,
+                    key="pa_height_in",
+                    help="Used to calculate BMI from height and weight.")
+with mc2:
+    st.number_input("Weight (lb)", min_value=70.0, max_value=500.0, step=1.0,
+                    key="pa_weight_lb",
+                    help="Used to calculate BMI from height and weight.")
+with mc3:
+    st.number_input("Waist (in)", min_value=20.0, max_value=80.0, step=0.5,
+                    key="pa_waist_in",
+                    help="Converted to cm internally for the metabolic clock.")
+with mc4:
+    # Compute BMI from height + weight using the imperial formula:
+    # BMI = (lb / in^2) * 703. Display read-only; the metabolic clock reads
+    # st.session_state["pa_bmi"] which we update here every render.
+    _h = st.session_state["pa_height_in"]
+    _w = st.session_state["pa_weight_lb"]
+    bmi_computed = (_w / (_h * _h)) * 703 if _h > 0 else 0.0
+    st.session_state["pa_bmi"] = bmi_computed
+    st.metric("BMI (computed)", f"{bmi_computed:.1f}")
+
+# Convert waist inches -> cm so downstream code (metabolic clock, intervention
+# simulator) keeps reading st.session_state["pa_waist"] in centimeters.
+st.session_state["pa_waist"] = st.session_state["pa_waist_in"] * 2.54
+
 st.markdown("#### Lab Values")
 st.caption(
     "Auto-populated from PDF upload above. Defaults are NHANES population means "
     "until you extract or override. All values feed the analyses in the tabs below."
 )
 
-# All 22 lab values in a single 4-column grid. Grouped clinically (chem panel,
-# CBC + inflammation, lipid + metabolic, liver enzymes + vitals) but rendered
-# as one continuous section without subheaders or expanders.
+# 20 lab values in a single 4-column grid (BMI and waist moved up to
+# Patient-Entered Values). Grouped clinically within columns but rendered as
+# one continuous section without subheaders or expanders.
 lc1, lc2, lc3, lc4 = st.columns(4)
 with lc1:
     st.number_input("Albumin (g/dL)",             min_value=2.5,  max_value=6.0,   step=0.1, key="pa_albumin")
@@ -284,23 +316,21 @@ with lc1:
     st.number_input("Glucose (mg/dL)",            min_value=50.0, max_value=400.0, step=1.0, key="pa_glucose")
     st.number_input("BUN (mg/dL)",                min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun")
     st.number_input("Uric acid (mg/dL)",          min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid")
-    st.number_input("Total bilirubin (mg/dL)",    min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
 with lc2:
     st.number_input("CRP (mg/L)",                 min_value=0.01, max_value=50.0,  step=0.1, key="pa_crp")
     st.number_input("Lymphocyte %",               min_value=5.0,  max_value=80.0,  step=0.5, key="pa_lymph")
     st.number_input("WBC (x1000/uL)",             min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc")
     st.number_input("MCV (fL)",                   min_value=70.0, max_value=110.0, step=0.5, key="pa_mcv")
     st.number_input("RDW (%)",                    min_value=10.0, max_value=25.0,  step=0.1, key="pa_rdw")
-    st.number_input("Platelet count (x1000/uL)",  min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
 with lc3:
     st.number_input("HbA1c (%)",                  min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c")
     st.number_input("Total cholesterol (mg/dL)",  min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol")
     st.number_input("HDL (mg/dL)",                min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl")
-    st.number_input("BMI (kg/m^2)",               min_value=15.0, max_value=70.0,  step=0.1, key="pa_bmi")
-    st.number_input("Waist circumference (cm)",   min_value=50.0, max_value=200.0, step=0.5, key="pa_waist")
+    st.number_input("Total bilirubin (mg/dL)",    min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
+    st.number_input("Total protein (g/dL)",       min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
 with lc4:
     st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
-    st.number_input("Total protein (g/dL)",       min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
+    st.number_input("Platelet count (x1000/uL)",  min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
     st.number_input("LDH (U/L)",                  min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh")
     st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
     st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
