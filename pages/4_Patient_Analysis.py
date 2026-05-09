@@ -80,12 +80,38 @@ DEFAULTS = {
     # Kidney Age inputs (Tab 6) - eGFR auto-computed
     "pa_bun":         13.7,
     "pa_uric_acid":   5.4,
+    "pa_race":        "Non-Hispanic White",
     "pa_extract_msg": "",
     "pa_extract_ok":  False,
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# Track which input keys the user (or PDF extraction) has explicitly set, so
+# unset fields can be flagged with a ⚠️ in the UI. A key is considered
+# "touched" if (a) PDF extraction populated it, OR (b) the user edited it
+# (on_change callback fires), OR (c) its current value differs from the
+# seeded default in the DEFAULTS dict.
+if "pa_touched_keys" not in st.session_state:
+    st.session_state["pa_touched_keys"] = set()
+
+
+def _mark_touched(key: str) -> None:
+    """on_change callback - record that an input was explicitly set."""
+    st.session_state["pa_touched_keys"].add(key)
+
+
+def _is_default(key: str) -> bool:
+    """True iff the field still holds its seeded default (and wasn't extracted)."""
+    if key in st.session_state["pa_touched_keys"]:
+        return False
+    return st.session_state.get(key) == DEFAULTS.get(key)
+
+
+def _mark(label: str, key: str) -> str:
+    """Prepend ⚠️ to a label when the input is still showing the default."""
+    return f"⚠️ {label}" if _is_default(key) else label
 
 # PDF extraction (Claude Haiku)
 def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
@@ -206,6 +232,10 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
             missing.append(key)
 
     if found:
+        # Mark every successfully extracted key as "touched" so the ⚠️
+        # default-warning emoji disappears from those inputs in the UI.
+        for k in found:
+            st.session_state["pa_touched_keys"].add(field_map[k][0])
         msg = f"Extracted {len(found)}/{len(field_map)} lab values: {', '.join(found)}."
         if missing:
             msg += f" Not found in report: {', '.join(missing)}. Enter these manually below."
@@ -241,7 +271,9 @@ st.info(
     "**Patient-entered values below (Age, Sex, Race / Ethnicity, Height, Weight, "
     "Waist) are not extracted from lab reports — please enter these manually.** "
     "BMI is auto-calculated from height and weight. All lab values further down "
-    "auto-populate from a PDF upload (above), or you can edit any value directly."
+    "auto-populate from a PDF upload (above), or you can edit any value directly. "
+    "**Fields marked ⚠️ are still showing NHANES population defaults — edit them "
+    "to record the patient's actual values.**"
 )
 
 RACE_OPTIONS = ["Non-Hispanic White", "Non-Hispanic Black",
@@ -263,28 +295,40 @@ st.markdown("#### Patient-Entered Values")
 # Demographics row
 dc1, dc2, dc3 = st.columns(3)
 with dc1:
-    st.number_input("Age (years)", min_value=18, max_value=100, step=1, key="pa_age")
+    st.number_input(_mark("Age (years)", "pa_age"),
+                    min_value=18, max_value=100, step=1, key="pa_age",
+                    on_change=_mark_touched, args=("pa_age",))
 with dc2:
-    st.selectbox("Sex", ["Male", "Female"], key="pa_sex",
+    st.selectbox(_mark("Sex", "pa_sex"),
+                 ["Male", "Female"], key="pa_sex",
+                 on_change=_mark_touched, args=("pa_sex",),
                  help="Used for normative reference percentile stratification.")
 with dc3:
-    st.selectbox("Race / Ethnicity", RACE_OPTIONS, key="pa_race",
+    st.selectbox(_mark("Race / Ethnicity", "pa_race"),
+                 RACE_OPTIONS, key="pa_race",
+                 on_change=_mark_touched, args=("pa_race",),
                  help="Used for matched-cohort reference. 'Prefer not to say' "
                       "falls back to age x sex matching.")
 
 # Anthropometrics row - height/weight/waist in US units; BMI is computed
 mc1, mc2, mc3, mc4 = st.columns(4)
 with mc1:
-    st.number_input("Height (in)", min_value=48.0, max_value=84.0, step=0.5,
+    st.number_input(_mark("Height (in)", "pa_height_in"),
+                    min_value=48.0, max_value=84.0, step=0.5,
                     key="pa_height_in",
+                    on_change=_mark_touched, args=("pa_height_in",),
                     help="Used to calculate BMI from height and weight.")
 with mc2:
-    st.number_input("Weight (lb)", min_value=70.0, max_value=500.0, step=1.0,
+    st.number_input(_mark("Weight (lb)", "pa_weight_lb"),
+                    min_value=70.0, max_value=500.0, step=1.0,
                     key="pa_weight_lb",
+                    on_change=_mark_touched, args=("pa_weight_lb",),
                     help="Used to calculate BMI from height and weight.")
 with mc3:
-    st.number_input("Waist (in)", min_value=20.0, max_value=80.0, step=0.5,
+    st.number_input(_mark("Waist (in)", "pa_waist_in"),
+                    min_value=20.0, max_value=80.0, step=0.5,
                     key="pa_waist_in",
+                    on_change=_mark_touched, args=("pa_waist_in",),
                     help="Converted to cm internally for the metabolic clock.")
 with mc4:
     # Compute BMI from height + weight using the imperial formula:
@@ -301,39 +345,96 @@ with mc4:
 st.session_state["pa_waist"] = st.session_state["pa_waist_in"] * 2.54
 
 st.markdown("#### Lab Values")
-st.caption(
-    "Auto-populated from PDF upload above. Defaults are NHANES population means "
-    "until you extract or override. All values feed the analyses in the tabs below."
-)
+
+# Count and surface how many lab values are still NHANES defaults so the user
+# knows at a glance how much manual data entry remains.
+_LAB_KEYS = [
+    "pa_albumin", "pa_creatinine", "pa_glucose", "pa_bun", "pa_uric_acid",
+    "pa_crp", "pa_lymph", "pa_wbc", "pa_mcv", "pa_rdw",
+    "pa_hba1c", "pa_total_chol", "pa_hdl", "pa_tbili", "pa_total_protein",
+    "pa_alkphos", "pa_platelet", "pa_ldh", "pa_sbp", "pa_dbp",
+]
+_n_default = sum(1 for k in _LAB_KEYS if _is_default(k))
+if _n_default > 0:
+    st.caption(
+        f"⚠️ **{_n_default} of {len(_LAB_KEYS)} lab values are still NHANES "
+        f"population defaults** — they were not found on the uploaded report. "
+        "Edit those fields below to enter the patient's actual values. "
+        "Marked fields use ⚠️ next to the label."
+    )
+else:
+    st.caption(
+        "All lab values entered or extracted. Edit any field directly to override."
+    )
 
 # 20 lab values in a single 4-column grid (BMI and waist moved up to
 # Patient-Entered Values). Grouped clinically within columns but rendered as
 # one continuous section without subheaders or expanders.
 lc1, lc2, lc3, lc4 = st.columns(4)
 with lc1:
-    st.number_input("Albumin (g/dL)",             min_value=2.5,  max_value=6.0,   step=0.1, key="pa_albumin")
-    st.number_input("Creatinine (mg/dL)",         min_value=0.3,  max_value=5.0,   step=0.1, key="pa_creatinine")
-    st.number_input("Glucose (mg/dL)",            min_value=50.0, max_value=400.0, step=1.0, key="pa_glucose")
-    st.number_input("BUN (mg/dL)",                min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun")
-    st.number_input("Uric acid (mg/dL)",          min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid")
+    st.number_input(_mark("Albumin (g/dL)", "pa_albumin"),
+                    min_value=2.5,  max_value=6.0,   step=0.1, key="pa_albumin",
+                    on_change=_mark_touched, args=("pa_albumin",))
+    st.number_input(_mark("Creatinine (mg/dL)", "pa_creatinine"),
+                    min_value=0.3,  max_value=5.0,   step=0.1, key="pa_creatinine",
+                    on_change=_mark_touched, args=("pa_creatinine",))
+    st.number_input(_mark("Glucose (mg/dL)", "pa_glucose"),
+                    min_value=50.0, max_value=400.0, step=1.0, key="pa_glucose",
+                    on_change=_mark_touched, args=("pa_glucose",))
+    st.number_input(_mark("BUN (mg/dL)", "pa_bun"),
+                    min_value=3.0,  max_value=100.0, step=0.5, key="pa_bun",
+                    on_change=_mark_touched, args=("pa_bun",))
+    st.number_input(_mark("Uric acid (mg/dL)", "pa_uric_acid"),
+                    min_value=1.5,  max_value=15.0,  step=0.1, key="pa_uric_acid",
+                    on_change=_mark_touched, args=("pa_uric_acid",))
 with lc2:
-    st.number_input("CRP (mg/L)",                 min_value=0.01, max_value=50.0,  step=0.1, key="pa_crp")
-    st.number_input("Lymphocyte %",               min_value=5.0,  max_value=80.0,  step=0.5, key="pa_lymph")
-    st.number_input("WBC (x1000/uL)",             min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc")
-    st.number_input("MCV (fL)",                   min_value=70.0, max_value=110.0, step=0.5, key="pa_mcv")
-    st.number_input("RDW (%)",                    min_value=10.0, max_value=25.0,  step=0.1, key="pa_rdw")
+    st.number_input(_mark("CRP (mg/L)", "pa_crp"),
+                    min_value=0.01, max_value=50.0,  step=0.1, key="pa_crp",
+                    on_change=_mark_touched, args=("pa_crp",))
+    st.number_input(_mark("Lymphocyte %", "pa_lymph"),
+                    min_value=5.0,  max_value=80.0,  step=0.5, key="pa_lymph",
+                    on_change=_mark_touched, args=("pa_lymph",))
+    st.number_input(_mark("WBC (x1000/uL)", "pa_wbc"),
+                    min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc",
+                    on_change=_mark_touched, args=("pa_wbc",))
+    st.number_input(_mark("MCV (fL)", "pa_mcv"),
+                    min_value=70.0, max_value=110.0, step=0.5, key="pa_mcv",
+                    on_change=_mark_touched, args=("pa_mcv",))
+    st.number_input(_mark("RDW (%)", "pa_rdw"),
+                    min_value=10.0, max_value=25.0,  step=0.1, key="pa_rdw",
+                    on_change=_mark_touched, args=("pa_rdw",))
 with lc3:
-    st.number_input("HbA1c (%)",                  min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c")
-    st.number_input("Total cholesterol (mg/dL)",  min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol")
-    st.number_input("HDL (mg/dL)",                min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl")
-    st.number_input("Total bilirubin (mg/dL)",    min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili")
-    st.number_input("Total protein (g/dL)",       min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein")
+    st.number_input(_mark("HbA1c (%)", "pa_hba1c"),
+                    min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c",
+                    on_change=_mark_touched, args=("pa_hba1c",))
+    st.number_input(_mark("Total cholesterol (mg/dL)", "pa_total_chol"),
+                    min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol",
+                    on_change=_mark_touched, args=("pa_total_chol",))
+    st.number_input(_mark("HDL (mg/dL)", "pa_hdl"),
+                    min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl",
+                    on_change=_mark_touched, args=("pa_hdl",))
+    st.number_input(_mark("Total bilirubin (mg/dL)", "pa_tbili"),
+                    min_value=0.1,  max_value=10.0,  step=0.1, key="pa_tbili",
+                    on_change=_mark_touched, args=("pa_tbili",))
+    st.number_input(_mark("Total protein (g/dL)", "pa_total_protein"),
+                    min_value=4.0,  max_value=10.0,  step=0.1, key="pa_total_protein",
+                    on_change=_mark_touched, args=("pa_total_protein",))
 with lc4:
-    st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
-    st.number_input("Platelet count (x1000/uL)",  min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet")
-    st.number_input("LDH (U/L)",                  min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh")
-    st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
-    st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
+    st.number_input(_mark("Alkaline phosphatase (U/L)", "pa_alkphos"),
+                    min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos",
+                    on_change=_mark_touched, args=("pa_alkphos",))
+    st.number_input(_mark("Platelet count (x1000/uL)", "pa_platelet"),
+                    min_value=50.0, max_value=600.0, step=1.0, key="pa_platelet",
+                    on_change=_mark_touched, args=("pa_platelet",))
+    st.number_input(_mark("LDH (U/L)", "pa_ldh"),
+                    min_value=50.0, max_value=600.0, step=1.0, key="pa_ldh",
+                    on_change=_mark_touched, args=("pa_ldh",))
+    st.number_input(_mark("Systolic BP (mmHg)", "pa_sbp"),
+                    min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp",
+                    on_change=_mark_touched, args=("pa_sbp",))
+    st.number_input(_mark("Diastolic BP (mmHg)", "pa_dbp"),
+                    min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp",
+                    on_change=_mark_touched, args=("pa_dbp",))
 
 age      = st.session_state["pa_age"]
 sex      = st.session_state["pa_sex"]
