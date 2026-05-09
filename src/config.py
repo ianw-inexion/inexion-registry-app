@@ -61,6 +61,9 @@ HRS_POA_PARQUET      = _dp("hrs_paceofaging.parquet")
 MIDUS_BIO_PARQUET    = _dp("midus_biomarker.parquet")
 MIDUS_COG_PARQUET    = _dp("midus_cognitive_m3.parquet")
 MIDUS_CODEBOOK_PARQUET = _dp("midus_codebook.parquet")
+NSHAP_BIO_PARQUET      = _dp("nshap_biomarker.parquet")
+NSHAP_SOCIAL_PARQUET   = _dp("nshap_social.parquet")
+NSHAP_CODEBOOK_PARQUET = _dp("nshap_codebook.parquet")
 HEADLINE_DIR         = _dp("headline_analyses")
 ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
 ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")
@@ -224,6 +227,27 @@ DATASETS = [
             "cross-domain biomarker -> cognition analyses."
         ),
         "path": MIDUS_COG_PARQUET,
+    },
+    {
+        "id": "nshap",
+        "name": "NSHAP (4 rounds, 2005-2023)",
+        "source": "ICPSR / NORC at the University of Chicago",
+        "status": "Pipeline scaffolded - awaiting Anant ICPSR download",
+        "access": "Public (ICPSR registration) + Restricted (IRB + DPP + DUA)",
+        "participants": 12000,
+        "cycles": 4,
+        "cycle_range": "2005-2023 (4 rounds)",
+        "description": (
+            "National Social Life, Health, and Aging Project. 4 longitudinal rounds "
+            "of older U.S. adults (57-85 at baseline). DBS biomarker panel from "
+            "Round 2 onward (HbA1c, CRP, total chol, hemoglobin, EBV/CMV antibodies). "
+            "Salivary cortisol from Round 1. Distinctive vs HRS / MIDUS: in-home "
+            "social-network roster, sensory measures (smell, hearing, peak flow), "
+            "functional measures (grip, gait). Public-use available via ICPSR; "
+            "restricted-use NDI mortality linkage requires IRB + DPP + DUA. "
+            "Pipeline: build_nshap_parquet.py (scaffolded, awaiting raw data)."
+        ),
+        "path": NSHAP_BIO_PARQUET,
     },
     {
         "id": "ukb",
