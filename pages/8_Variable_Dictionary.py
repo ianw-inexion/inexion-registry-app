@@ -40,7 +40,7 @@ for group, sub in df.groupby("Group", sort=False):
     )
     st.dataframe(
         sub[["Key", "Label", "Unit", "Range", "Description"]],
-        use_container_width=True, hide_index=True, height=min(400, 55 + 35 * len(sub)),
+        width='stretch', hide_index=True, height=min(400, 55 + 35 * len(sub)),
     )
 
 st.caption(f"{len(df)} variables shown.")

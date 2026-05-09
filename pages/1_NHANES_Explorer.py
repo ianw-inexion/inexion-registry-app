@@ -125,7 +125,7 @@ if len(dist):
         bargap=0.02, plot_bgcolor="white", paper_bgcolor="white",
         font_color="#1A1A2E", height=360, margin=dict(t=20, b=40, l=40, r=20),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 # ── Trend over NHANES cycles ─────────────────────────────────────────────────
 st.markdown("### Trend over NHANES cycles")
@@ -149,12 +149,12 @@ if len(trend):
         plot_bgcolor="white", paper_bgcolor="white",
         font_color="#1A1A2E", height=360, margin=dict(t=20, b=40, l=40, r=20),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 # ── Preview + export ─────────────────────────────────────────────────────────
 st.markdown("### Preview")
 preview = data.cohort_preview(filters, limit=500)
-st.dataframe(preview, use_container_width=True, height=320)
+st.dataframe(preview, width='stretch', height=320)
 
 st.markdown("### Export")
 ex_col1, ex_col2 = st.columns([1, 3])

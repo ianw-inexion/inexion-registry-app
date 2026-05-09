@@ -234,7 +234,7 @@ with c3:
     wbc      = st.number_input("WBC (×1000/µL)",             2.0,  20.0,  st.session_state["wbc"],       step=0.1,  key="wbc")
 
 # ── Compute ───────────────────────────────────────────────────────────────────
-if st.button("Calculate biological age", type="primary", use_container_width=True):
+if st.button("Calculate biological age", type="primary", width='stretch'):
     r = compute_phenoage(
         age=age,
         albumin_g_dl=albumin,
@@ -292,7 +292,7 @@ if st.button("Calculate biological age", type="primary", use_container_width=Tru
         xaxis=dict(range=[0, max(age, pa) * 1.25], title="Age (years)"),
         margin=dict(t=20, b=40, l=40, r=40),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     st.caption(
         "PhenoAge is a research instrument validated on NHANES population data (Levine et al., 2018). "
