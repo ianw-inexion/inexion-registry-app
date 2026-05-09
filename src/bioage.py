@@ -92,6 +92,13 @@ def compute_phenoage(
     }
 
 
+# 9x9 input order used by every bootstrap variant. CRP is in log-space.
+_BOOT_INPUT_ORDER = (
+    "albumin", "creatinine", "glucose", "crp",  # crp = log-CRP
+    "lymphocyte_pct", "mcv", "rdw", "alk_phos", "wbc",
+)
+
+
 def bootstrap_phenoage(
     age: float,
     albumin_g_dl: float,
@@ -105,6 +112,7 @@ def bootstrap_phenoage(
     wbc_1000_ul: float,
     n_boot: int = 1000,
     seed: int = 42,
+    corr_matrix=None,
 ) -> dict:
     """
     Monte Carlo propagation of analytical measurement error through PhenoAge.
@@ -126,18 +134,48 @@ def bootstrap_phenoage(
     mort_draws = np.empty(n_boot, dtype=float)
 
     log_crp = math.log(max(crp_mg_l, 0.01))
-    log_crp_sigma = cv["crp"]
+
+    # Per-marker SDs on the perturbation scale (linear for most; log for CRP).
+    sigmas = np.array([
+        albumin_g_dl     * cv["albumin"],
+        creatinine_mg_dl * cv["creatinine"],
+        glucose_mg_dl    * cv["glucose"],
+        cv["crp"],                              # log-CRP scale -> sigma is the CV directly
+        lymphocyte_pct   * cv["lymphocyte_pct"],
+        mcv_fl           * cv["mcv"],
+        rdw_pct          * cv["rdw"],
+        alk_phos_u_l     * cv["alk_phos"],
+        wbc_1000_ul      * cv["wbc"],
+    ], dtype=float)
+
+    if corr_matrix is None:
+        # Independent perturbations (legacy behavior, Phase 3 default)
+        cov = np.diag(sigmas ** 2)
+    else:
+        # Correlation-aware: Sigma_ij = sigma_i * sigma_j * R_ij
+        R = np.asarray(corr_matrix, dtype=float)
+        if R.shape != (9, 9):
+            raise ValueError(f"corr_matrix must be 9x9, got {R.shape}")
+        cov = (sigmas[:, None] * sigmas[None, :]) * R
+        # Symmetric PD safety: nudge tiny negative eigenvalues to 0
+        sym = (cov + cov.T) / 2.0
+        eigvals, eigvecs = np.linalg.eigh(sym)
+        eigvals = np.maximum(eigvals, 0.0)
+        cov = (eigvecs * eigvals) @ eigvecs.T
+
+    deltas = rng.multivariate_normal(np.zeros(9), cov, size=n_boot)
 
     for i in range(n_boot):
-        b_alb = albumin_g_dl     * (1 + rng.normal(0, cv["albumin"]))
-        b_cre = creatinine_mg_dl * (1 + rng.normal(0, cv["creatinine"]))
-        b_glu = glucose_mg_dl    * (1 + rng.normal(0, cv["glucose"]))
-        b_crp = math.exp(log_crp + rng.normal(0, log_crp_sigma))
-        b_lym = lymphocyte_pct   * (1 + rng.normal(0, cv["lymphocyte_pct"]))
-        b_mcv = mcv_fl           * (1 + rng.normal(0, cv["mcv"]))
-        b_rdw = rdw_pct          * (1 + rng.normal(0, cv["rdw"]))
-        b_alk = alk_phos_u_l     * (1 + rng.normal(0, cv["alk_phos"]))
-        b_wbc = wbc_1000_ul      * (1 + rng.normal(0, cv["wbc"]))
+        d = deltas[i]
+        b_alb = albumin_g_dl     + d[0]
+        b_cre = creatinine_mg_dl + d[1]
+        b_glu = glucose_mg_dl    + d[2]
+        b_crp = math.exp(log_crp + d[3])
+        b_lym = lymphocyte_pct   + d[4]
+        b_mcv = mcv_fl           + d[5]
+        b_rdw = rdw_pct          + d[6]
+        b_alk = alk_phos_u_l     + d[7]
+        b_wbc = wbc_1000_ul      + d[8]
 
         out = compute_phenoage(
             age, b_alb, b_cre, b_glu, b_crp, b_lym,

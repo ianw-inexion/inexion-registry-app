@@ -195,11 +195,28 @@ st.caption(
     "Enter or upload once - explore everywhere."
 )
 
+RACE_OPTIONS = ["Non-Hispanic White", "Non-Hispanic Black",
+                "Mexican American", "Other Hispanic", "Other / Multi-racial",
+                "Prefer not to say"]
+RACE_TO_NHANES = {
+    "Non-Hispanic White":   3,
+    "Non-Hispanic Black":   4,
+    "Mexican American":     1,
+    "Other Hispanic":       2,
+    "Other / Multi-racial": 5,
+    "Prefer not to say":    None,
+}
+if "pa_race" not in st.session_state:
+    st.session_state["pa_race"] = "Non-Hispanic White"
+
 dcol, _ = st.columns([1, 2])
 with dcol:
     st.number_input("Age (years)", min_value=18, max_value=100, step=1, key="pa_age")
     st.selectbox("Sex", ["Male", "Female"], key="pa_sex",
                  help="Used for normative reference percentile stratification.")
+    st.selectbox("Race / Ethnicity", RACE_OPTIONS, key="pa_race",
+                 help="Used for matched-cohort reference. 'Prefer not to say' "
+                      "falls back to age x sex matching.")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -238,11 +255,25 @@ mortality = pa_result["mortality_10y"]
 
 # Bootstrap measurement-error CIs - cached on the input tuple
 @st.cache_data(show_spinner=False)
+def _phenoage_input_corr():
+    """Empirical 9x9 correlation matrix among PhenoAge inputs (CRP in log)."""
+    if not data_exists(NHANES_PARQUET):
+        return None
+    cols = ['albumin','creatinine','glucose_biopro','crp','lymphocyte_pct',
+            'mcv','rdw','alkaline_phosphatase','wbc']
+    ref_df = pd.read_parquet(NHANES_PARQUET, columns=cols).dropna()
+    ref_df['crp'] = np.log(ref_df['crp'].clip(lower=0.01))
+    return ref_df.corr().to_numpy()
+
+_PA_CORR = _phenoage_input_corr()
+
+@st.cache_data(show_spinner=False)
 def _boot_ci(age, albumin, creatinine, glucose, crp, lymph,
              mcv, rdw, alkphos, wbc, n_boot=1000):
     return bootstrap_phenoage(
         age, albumin, creatinine, glucose, crp, lymph,
         mcv, rdw, alkphos, wbc, n_boot=n_boot,
+        corr_matrix=_PA_CORR,
     )
 
 ci = _boot_ci(age, albumin, creatinine, glucose, crp, lymph,
@@ -349,7 +380,8 @@ with tabs[1]:
         if not data_exists(NHANES_PARQUET):
             return pd.DataFrame()
         df = pd.read_parquet(NHANES_PARQUET,
-            columns=['age','sex','phenoage_delta','phenoage','exam_weight_adj'])
+            columns=['age','sex','race_ethnicity','phenoage_delta',
+                     'phenoage','exam_weight_adj'])
         df = df[df['phenoage_delta'].notna() & df['age'].between(20, 85)].copy()
         df['sex_label'] = df['sex'].map({1:'Male', 2:'Female'})
         return df
@@ -363,22 +395,49 @@ with tabs[1]:
         age_bin = max(20, min(80, age_bin))
         age_lo, age_hi = age_bin, age_bin + 9
         sex_code = 1 if sex == "Male" else 2
+        race_code = RACE_TO_NHANES.get(st.session_state.get("pa_race",
+                                                              "Prefer not to say"))
 
+        # Try age x sex x race first; fall back to age x sex if race subgroup
+        # is too small (n<50) or user chose "Prefer not to say"
+        match_used = "age x sex x race"
         ref_cohort = ref[
             ref['age'].between(age_lo, age_hi) &
             (ref['sex'] == sex_code) &
             ref['phenoage_delta'].notna()
         ]
+        if race_code is not None:
+            attempt = ref_cohort[ref_cohort.get('race_ethnicity') == race_code]
+            if len(attempt) >= 50:
+                ref_cohort = attempt
+            else:
+                match_used = "age x sex (race subgroup n<50)"
+        else:
+            match_used = "age x sex (race not provided)"
+
+        # If still too small, widen age window
         if len(ref_cohort) < 50:
             ref_cohort = ref[
                 ref['age'].between(max(20, age_lo - 10), min(85, age_hi + 10)) &
                 (ref['sex'] == sex_code) &
                 ref['phenoage_delta'].notna()
             ]
+            match_used = "age decade widened x sex (small original cell)"
 
         n_ref = len(ref_cohort)
         deltas = ref_cohort['phenoage_delta'].values
-        percentile = float(stats.percentileofscore(deltas, delta, kind='rank'))
+
+        # Survey-weighted percentile (Kish-style) using exam_weight_adj
+        from src.stats import weighted_quantile
+        if 'exam_weight_adj' in ref_cohort.columns and ref_cohort['exam_weight_adj'].notna().any():
+            weights = ref_cohort['exam_weight_adj'].values
+            # Walk percentiles 1..99 to find the patient's percentile
+            qs = np.linspace(0.01, 0.99, 99)
+            edges = np.array([weighted_quantile(deltas, q, weights) for q in qs])
+            percentile = float(np.searchsorted(edges, delta, side='right'))
+            percentile = float(np.clip(percentile, 0, 100))
+        else:
+            percentile = float(stats.percentileofscore(deltas, delta, kind='rank'))
 
         pct_color = CORAL if percentile > 75 else (TEAL if percentile < 25 else GOLD)
         direction = "faster" if delta > 0 else "slower"
@@ -391,11 +450,15 @@ with tabs[1]:
             f"{direction} than {100 - percentile:.0f}% of their peers."
         )
 
+        race_label = st.session_state.get("pa_race", "—")
         cA, cB, cC, cD = st.columns(4)
         cA.metric("Percentile", f"{percentile:.0f}th")
-        cB.metric("Reference group", f"{sex}s {age_lo}-{age_hi}")
+        cB.metric("Reference group",
+                   f"{race_label} {sex.lower()}s {age_lo}-{age_hi}"
+                   if "race" in match_used else f"{sex}s {age_lo}-{age_hi}")
         cC.metric("Reference n", f"{n_ref:,}")
         cD.metric("Group mean delta", f"{deltas.mean():+.2f} yrs")
+        st.caption(f"Match: {match_used}. Percentile is survey-weighted (NHANES exam_weight_adj).")
 
         st.markdown(
             f"<div style='background:#F2F4F8;border-left:4px solid {pct_color};"
@@ -649,8 +712,6 @@ with tabs[2]:
         imp_color = TEAL if improvement > 0 else CORAL
         sign = "-" if improvement > 0 else "+"
 
-        # Bootstrap CI on the simulated delta too, so the user can see whether
-        # the simulated change is meaningful relative to lab noise.
         sim_ci = _boot_ci(age, sim_albumin, sim_creatinine, sim_glucose, sim_crp,
                           sim_lymph, sim_mcv, sim_rdw, sim_alkphos, sim_wbc, n_boot=500)
 
@@ -669,9 +730,60 @@ with tabs[2]:
             unsafe_allow_html=True,
         )
 
+        # Phase 7.3 - dual-CI plot: baseline vs simulated delta with CI bands
+        fig_ci = go.Figure()
+        # Baseline CI
+        fig_ci.add_trace(go.Scatter(
+            x=[ci['delta_lo'], ci['delta_hi']], y=[1, 1],
+            mode='lines', line=dict(color=NAVY, width=10),
+            name='Baseline 95% CI', showlegend=True,
+        ))
+        fig_ci.add_trace(go.Scatter(
+            x=[delta], y=[1],
+            mode='markers', marker=dict(color=GOLD, size=18,
+                                          line=dict(color=NAVY, width=2)),
+            name='Baseline point', showlegend=False,
+        ))
+        # Simulated CI
+        fig_ci.add_trace(go.Scatter(
+            x=[sim_ci['delta_lo'], sim_ci['delta_hi']], y=[0, 0],
+            mode='lines', line=dict(color=imp_color, width=10),
+            name='Simulated 95% CI', showlegend=True,
+        ))
+        fig_ci.add_trace(go.Scatter(
+            x=[delta_sim], y=[0],
+            mode='markers', marker=dict(color=GOLD, size=18,
+                                          line=dict(color=imp_color, width=2)),
+            name='Simulated point', showlegend=False,
+        ))
+        fig_ci.add_vline(x=0, line_dash='dash', line_color='gray',
+                          annotation_text='No advance', annotation_position='top')
+        # Shaded "meaningful change" zone if simulated CI does NOT overlap baseline CI
+        no_overlap = (sim_ci['delta_hi'] < ci['delta_lo']) or (sim_ci['delta_lo'] > ci['delta_hi'])
+        verdict = ("Simulated CI does NOT overlap baseline CI - change exceeds lab noise."
+                   if no_overlap else
+                   "Simulated CI overlaps baseline CI - change is within lab noise.")
+        pad = max(2.0, abs(delta) * 0.5, abs(delta_sim) * 0.5)
+        x_lo = min(ci['delta_lo'], sim_ci['delta_lo']) - 1
+        x_hi = max(ci['delta_hi'], sim_ci['delta_hi']) + 1
+        fig_ci.update_layout(
+            height=180, plot_bgcolor='white', paper_bgcolor='white',
+            font_color='#1A1A2E',
+            xaxis=dict(title='PhenoAge delta (years)',
+                        range=[min(x_lo, -pad), max(x_hi, pad)], zeroline=False),
+            yaxis=dict(visible=False, range=[-0.5, 1.5],
+                        tickvals=[0, 1], ticktext=['Simulated', 'Baseline']),
+            yaxis_showticklabels=True,
+            margin=dict(t=10, b=40, l=80, r=20),
+            legend=dict(orientation='h', y=-0.25),
+        )
+        st.plotly_chart(fig_ci, use_container_width=True, key='pa_dual_ci')
+        st.caption(verdict)
+
         st.caption(
             "PhenoAge: Levine et al., Aging Cell 2018. Contributions computed as "
             "coefficient * (patient_value - NHANES population mean). "
-            "Simulated delta CI uses the same n=500 measurement-error bootstrap as Tab 1. "
+            "Simulated delta CI uses the same n=500 measurement-error bootstrap as Tab 1, "
+            "with the empirical NHANES correlation matrix among the 9 inputs. "
             "This tool is for research and clinical exploration - not a diagnostic instrument."
         )
