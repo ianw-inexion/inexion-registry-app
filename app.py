@@ -56,16 +56,16 @@ st.markdown(
         }}
 
         /* Logo - st.logo renders into a stSidebarHeader testid. Force it
-           wider and centered. The inner img often has inline width set by
-           Streamlit so we override with !important. */
+           wider and centered with breathing room above and below. */
         [data-testid="stSidebarHeader"],
         [data-testid="stSidebar"] > div > div:first-child:has(img) {{
             display: flex !important;
             justify-content: center !important;
             align-items: center !important;
-            padding: 18px 12px 14px 12px !important;
+            padding: 28px 12px 24px 12px !important;
             border-bottom: 1px solid rgba(13, 27, 62, 0.08) !important;
-            margin-bottom: 8px !important;
+            margin-top: 8px !important;
+            margin-bottom: 16px !important;
             width: 100% !important;
         }}
         [data-testid="stSidebarHeader"] img,
@@ -79,15 +79,19 @@ st.markdown(
             display: block !important;
         }}
 
-        /* SECTION HEADERS - target every plausible Streamlit DOM shape:
-           - <summary> (details/summary collapsibles, current Streamlit)
-           - <h2>/<h3>/[role=heading] (older fallbacks)
-           - non-link divs / spans inside stSidebarNav
-           - first-child of section/li that has no anchor child
-        */
+        /* SECTION HEADERS - target every plausible Streamlit DOM shape.
+           Explicit coverage for both expanded (<details open>) AND
+           collapsed (<details>) summary elements; plus the JS-tagged
+           .inexion-section-header class added by the script below as a
+           guaranteed fallback. */
+        .inexion-section-header,
+        [data-testid="stSidebarNav"] details[open] > summary,
+        [data-testid="stSidebarNav"] details:not([open]) > summary,
         [data-testid="stSidebarNav"] summary,
         [data-testid="stSidebarNav"] details > summary,
         [data-testid="stSidebarNav"] [data-testid="stSidebarNavSeparator"],
+        [data-testid="stSidebarNav"] [data-testid*="GroupHeader"],
+        [data-testid="stSidebarNav"] [data-testid*="Group"],
         [data-testid="stSidebarNav"] li > summary,
         [data-testid="stSidebarNav"] li > div:not(:has(a)),
         [data-testid="stSidebarNav"] li > span:not(:has(a)),
@@ -242,4 +246,33 @@ _PAGES = {
 }
 
 pg = st.navigation(_PAGES, position="sidebar", expanded=True)
+
+# JS fallback - tag every section header in the sidebar nav with the
+# .inexion-section-header class so CSS styling reliably hits them.
+import streamlit.components.v1 as components
+components.html(
+    """
+    <script>
+    (function() {
+        const tag = () => {
+            const root = window.parent.document;
+            const nav = root.querySelector('[data-testid="stSidebarNav"]');
+            if (!nav) return;
+            const candidates = nav.querySelectorAll('summary, li > div, li > span, [role="heading"], h2, h3');
+            candidates.forEach(el => {
+                if (el.querySelector('a')) return;
+                if (el.closest('a')) return;
+                el.classList.add('inexion-section-header');
+            });
+        };
+        tag();
+        const obs = new MutationObserver(tag);
+        const target = window.parent.document.querySelector('[data-testid="stSidebar"]');
+        if (target) obs.observe(target, {childList: true, subtree: true});
+    })();
+    </script>
+    """,
+    height=0, width=0,
+)
+
 pg.run()
