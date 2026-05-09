@@ -1,4 +1,5 @@
-streamlit>=1.32
+# INEXION Registry app — rebuild marker 2026-05-08
+streamlit>=1.36
 scipy>=1.11
 s3fs>=2024.1.0
 boto3>=1.34
