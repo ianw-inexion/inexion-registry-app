@@ -59,6 +59,14 @@ DEFAULTS = {
     "pa_rdw":         13.0,
     "pa_alkphos":     70.0,
     "pa_wbc":         6.5,
+    # Metabolic Age inputs (Tab 4) - NHANES population means as defaults
+    "pa_hba1c":       5.7,
+    "pa_total_chol":  196.0,
+    "pa_hdl":         53.0,
+    "pa_bmi":         28.9,
+    "pa_waist":       98.7,
+    "pa_sbp":         125.0,
+    "pa_dbp":         70.0,
     "pa_extract_msg": "",
     "pa_extract_ok":  False,
 }
@@ -99,15 +107,22 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         "Extract the following biomarker values from this lab report.\n"
         "Return a JSON object with exactly these keys and units:\n"
         "{\n"
-        '  "albumin":   <float, g/dL>,\n'
-        '  "creatinine":<float, mg/dL>,\n'
-        '  "glucose":   <float, mg/dL fasting>,\n'
-        '  "crp":       <float, mg/L; if reported as mg/dL multiply by 10>,\n'
-        '  "lymph":     <float, % lymphocyte>,\n'
-        '  "mcv":       <float, fL>,\n'
-        '  "rdw":       <float, %>,\n'
-        '  "alkphos":   <float, U/L alkaline phosphatase>,\n'
-        '  "wbc":       <float, x1000/uL>\n'
+        '  "albumin":     <float, g/dL>,\n'
+        '  "creatinine":  <float, mg/dL>,\n'
+        '  "glucose":     <float, mg/dL fasting>,\n'
+        '  "crp":         <float, mg/L; if reported as mg/dL multiply by 10>,\n'
+        '  "lymph":       <float, % lymphocyte>,\n'
+        '  "mcv":         <float, fL>,\n'
+        '  "rdw":         <float, %>,\n'
+        '  "alkphos":     <float, U/L alkaline phosphatase>,\n'
+        '  "wbc":         <float, x1000/uL>,\n'
+        '  "hba1c":       <float, percent (e.g. 5.7)>,\n'
+        '  "total_chol":  <float, mg/dL>,\n'
+        '  "hdl":         <float, mg/dL>,\n'
+        '  "bmi":         <float, kg/m^2>,\n'
+        '  "waist":       <float, cm>,\n'
+        '  "sbp":         <float, mmHg systolic>,\n'
+        '  "dbp":         <float, mmHg diastolic>\n'
         "}\n\n"
         f"Lab report text:\n{lab_text}"
     )
@@ -145,6 +160,13 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         "rdw":        ("pa_rdw",        10.0, 25.0),
         "alkphos":    ("pa_alkphos",    20.0, 400.0),
         "wbc":        ("pa_wbc",        2.0,  20.0),
+        "hba1c":      ("pa_hba1c",      3.5,  18.0),
+        "total_chol": ("pa_total_chol", 80.0, 400.0),
+        "hdl":        ("pa_hdl",        15.0, 150.0),
+        "bmi":        ("pa_bmi",        15.0, 70.0),
+        "waist":      ("pa_waist",      50.0, 200.0),
+        "sbp":        ("pa_sbp",        80.0, 220.0),
+        "dbp":        ("pa_dbp",        40.0, 130.0),
     }
     found, missing = [], []
     for key, (state_key, lo, hi) in field_map.items():
@@ -232,6 +254,24 @@ with c3:
     st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
     st.number_input("WBC (x1000/uL)",             min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc")
 
+# Optional metabolic markers - power the Metabolic Age tab
+with st.expander("Metabolic markers (for Metabolic Age tab) - optional", expanded=False):
+    st.caption(
+        "These 7 markers feed the Metabolic Age tab. Values default to NHANES "
+        "population means; pre-filled automatically if extracted from a lab PDF."
+    )
+    mc1, mc2, mc3 = st.columns(3)
+    with mc1:
+        st.number_input("HbA1c (%)",                  min_value=3.5,  max_value=18.0,  step=0.1, key="pa_hba1c")
+        st.number_input("Total cholesterol (mg/dL)",  min_value=80.0, max_value=400.0, step=1.0, key="pa_total_chol")
+        st.number_input("HDL (mg/dL)",                min_value=15.0, max_value=150.0, step=1.0, key="pa_hdl")
+    with mc2:
+        st.number_input("BMI (kg/m^2)",               min_value=15.0, max_value=70.0,  step=0.1, key="pa_bmi")
+        st.number_input("Waist circumference (cm)",   min_value=50.0, max_value=200.0, step=0.5, key="pa_waist")
+    with mc3:
+        st.number_input("Systolic BP (mmHg)",         min_value=80.0, max_value=220.0, step=1.0, key="pa_sbp")
+        st.number_input("Diastolic BP (mmHg)",        min_value=40.0, max_value=130.0, step=1.0, key="pa_dbp")
+
 age      = st.session_state["pa_age"]
 sex      = st.session_state["pa_sex"]
 albumin  = st.session_state["pa_albumin"]
@@ -243,6 +283,14 @@ mcv      = st.session_state["pa_mcv"]
 rdw      = st.session_state["pa_rdw"]
 alkphos  = st.session_state["pa_alkphos"]
 wbc      = st.session_state["pa_wbc"]
+# Metabolic markers
+hba1c_pa     = st.session_state["pa_hba1c"]
+total_chol_pa = st.session_state["pa_total_chol"]
+hdl_pa       = st.session_state["pa_hdl"]
+bmi_pa       = st.session_state["pa_bmi"]
+waist_pa     = st.session_state["pa_waist"]
+sbp_pa       = st.session_state["pa_sbp"]
+dbp_pa       = st.session_state["pa_dbp"]
 
 pa_result = compute_phenoage(
     age=age, albumin_g_dl=albumin, creatinine_mg_dl=creatinine,
@@ -281,7 +329,106 @@ ci = _boot_ci(age, albumin, creatinine, glucose, crp, lymph,
 
 st.markdown("---")
 
-tabs = st.tabs(["Biological Age", "Normative Reference", "Intervention Simulator"])
+# Load Phase 4 Metabolic-clock coefficients from organ_clocks_params.json
+@st.cache_data(show_spinner=False)
+def _load_metabolic_clock():
+    from src.config import ORGAN_CLOCKS_PARAMS_PATH, IS_S3
+    import json
+    try:
+        if IS_S3:
+            import s3fs
+            fs = s3fs.S3FileSystem(anon=False)
+            with fs.open(str(ORGAN_CLOCKS_PARAMS_PATH).replace("s3://",""), "r") as f:
+                params = json.load(f)
+        else:
+            with open(ORGAN_CLOCKS_PARAMS_PATH, "r") as f:
+                params = json.load(f)
+        return params["clocks"]["nhanes_metabolic"]
+    except Exception:
+        return None
+
+_METAB = _load_metabolic_clock()
+
+# NHANES population means for the metabolic markers (used as the
+# "no contribution" baseline in the contribution waterfall).
+_METAB_REF_MEANS = {
+    "hba1c":             5.72,
+    "total_cholesterol": 195.96,
+    "hdl":               53.15,
+    "bmi":               28.95,
+    "waist_cm":          98.72,
+    "systolic_mean":     125.01,
+    "diastolic_mean":    70.17,
+}
+
+# Lab analytical CVs for metabolic-age bootstrap CIs
+_METAB_CV = {
+    "hba1c": 0.025, "total_cholesterol": 0.030, "hdl": 0.040,
+    "bmi": 0.010, "waist_cm": 0.020,
+    "systolic_mean": 0.050, "diastolic_mean": 0.050,
+}
+
+def compute_metabolic_age(hba1c, total_chol, hdl, bmi, waist, sbp, dbp):
+    if _METAB is None or not _METAB.get("fit_ok"):
+        return None
+    coefs = _METAB["coefficients"]
+    val = (
+        _METAB["intercept"]
+        + coefs["hba1c"]             * hba1c
+        + coefs["total_cholesterol"] * total_chol
+        + coefs["hdl"]               * hdl
+        + coefs["bmi"]               * bmi
+        + coefs["waist_cm"]          * waist
+        + coefs["systolic_mean"]     * sbp
+        + coefs["diastolic_mean"]    * dbp
+    )
+    return float(val)
+
+def metabolic_contributions(hba1c, total_chol, hdl, bmi, waist, sbp, dbp):
+    if _METAB is None or not _METAB.get("fit_ok"):
+        return {}
+    coefs = _METAB["coefficients"]
+    pat = {
+        "hba1c": hba1c, "total_cholesterol": total_chol, "hdl": hdl,
+        "bmi": bmi, "waist_cm": waist,
+        "systolic_mean": sbp, "diastolic_mean": dbp,
+    }
+    label = {
+        "hba1c": "HbA1c", "total_cholesterol": "Total cholesterol", "hdl": "HDL",
+        "bmi": "BMI", "waist_cm": "Waist",
+        "systolic_mean": "Systolic BP", "diastolic_mean": "Diastolic BP",
+    }
+    return {label[k]: coefs[k] * (pat[k] - _METAB_REF_MEANS[k])
+            for k in pat}
+
+def bootstrap_metabolic(values_dict, n_boot=500, seed=42):
+    """Bootstrap the metabolic-age advance using per-marker CV perturbations."""
+    rng = np.random.default_rng(seed)
+    advances = np.empty(n_boot, dtype=float)
+    keys = ["hba1c", "total_cholesterol", "hdl", "bmi", "waist_cm",
+            "systolic_mean", "diastolic_mean"]
+    sigs = np.array([values_dict[k] * _METAB_CV[k] for k in keys])
+    for i in range(n_boot):
+        d = rng.normal(0, sigs)
+        v = compute_metabolic_age(
+            values_dict["hba1c"]             + d[0],
+            values_dict["total_cholesterol"] + d[1],
+            values_dict["hdl"]               + d[2],
+            values_dict["bmi"]               + d[3],
+            values_dict["waist_cm"]          + d[4],
+            values_dict["systolic_mean"]     + d[5],
+            values_dict["diastolic_mean"]    + d[6],
+        )
+        advances[i] = (v - age) if v is not None else float("nan")
+    return {
+        "advance_p50": float(np.percentile(advances, 50)),
+        "advance_lo":  float(np.percentile(advances, 2.5)),
+        "advance_hi":  float(np.percentile(advances, 97.5)),
+        "n_boot": n_boot,
+    }
+
+tabs = st.tabs(["Biological Age (PhenoAge)", "Normative Reference",
+                "PhenoAge Intervention", "Metabolic Age"])
 
 # TAB 1 - BIOLOGICAL AGE
 with tabs[0]:
@@ -730,9 +877,7 @@ with tabs[2]:
             unsafe_allow_html=True,
         )
 
-        # Phase 7.3 - dual-CI plot: baseline vs simulated delta with CI bands
         fig_ci = go.Figure()
-        # Baseline CI
         fig_ci.add_trace(go.Scatter(
             x=[ci['delta_lo'], ci['delta_hi']], y=[1, 1],
             mode='lines', line=dict(color=NAVY, width=10),
@@ -744,7 +889,6 @@ with tabs[2]:
                                           line=dict(color=NAVY, width=2)),
             name='Baseline point', showlegend=False,
         ))
-        # Simulated CI
         fig_ci.add_trace(go.Scatter(
             x=[sim_ci['delta_lo'], sim_ci['delta_hi']], y=[0, 0],
             mode='lines', line=dict(color=imp_color, width=10),
@@ -758,7 +902,6 @@ with tabs[2]:
         ))
         fig_ci.add_vline(x=0, line_dash='dash', line_color='gray',
                           annotation_text='No advance', annotation_position='top')
-        # Shaded "meaningful change" zone if simulated CI does NOT overlap baseline CI
         no_overlap = (sim_ci['delta_hi'] < ci['delta_lo']) or (sim_ci['delta_lo'] > ci['delta_hi'])
         verdict = ("Simulated CI does NOT overlap baseline CI - change exceeds lab noise."
                    if no_overlap else
@@ -786,4 +929,185 @@ with tabs[2]:
             "Simulated delta CI uses the same n=500 measurement-error bootstrap as Tab 1, "
             "with the empirical NHANES correlation matrix among the 9 inputs. "
             "This tool is for research and clinical exploration - not a diagnostic instrument."
+        )
+
+# =============================================================================
+# TAB 4 - METABOLIC AGE
+# =============================================================================
+with tabs[3]:
+    if _METAB is None or not _METAB.get("fit_ok"):
+        st.warning("Metabolic clock coefficients not loaded. "
+                    "Check organ_clocks_params.json in S3.")
+    else:
+        m_age = compute_metabolic_age(hba1c_pa, total_chol_pa, hdl_pa,
+                                        bmi_pa, waist_pa, sbp_pa, dbp_pa)
+        m_advance = m_age - age
+        m_color = TEAL if m_advance <= 0 else CORAL
+        m_label = "biologically younger" if m_advance <= 0 else "biologically older"
+
+        # Bootstrap CI on metabolic advance
+        m_ci = bootstrap_metabolic({
+            "hba1c": hba1c_pa, "total_cholesterol": total_chol_pa, "hdl": hdl_pa,
+            "bmi": bmi_pa, "waist_cm": waist_pa,
+            "systolic_mean": sbp_pa, "diastolic_mean": dbp_pa,
+        }, n_boot=500)
+
+        st.markdown(
+            f"""
+            <div style='background:{NAVY}; color:white; padding:28px;
+                        border-radius:10px; text-align:center; margin-top:8px;'>
+                <div style='color:{GOLD}; font-size:12px; letter-spacing:2px;
+                            text-transform:uppercase;'>Metabolic Age (NHANES-trained)</div>
+                <div style='font-size:56px; font-weight:800; margin-top:6px;'>
+                    {m_age:.1f} <span style='color:{GOLD}; font-size:28px;'>years</span>
+                </div>
+                <div style='font-size:18px; color:{m_color}; margin-top:8px; font-weight:600;'>
+                    {m_advance:+.1f} years - {m_label} than chronological age
+                </div>
+                <div style='font-size:14px; color:#C9CBD4; margin-top:4px;'>
+                    95% CI on advance: [{m_ci['advance_lo']:+.1f}, {m_ci['advance_hi']:+.1f}] years
+                    &nbsp;-&nbsp; bootstrap n={m_ci['n_boot']}
+                </div>
+                <div style='font-size:13px; color:#C9CBD4; margin-top:14px;'>
+                    Phase 4 NHANES-trained metabolic clock. R^2={_METAB['r2']:.3f},
+                    age-adjusted Cox HR=1.027/yr advance, C-index=0.835.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Contribution waterfall
+        st.markdown("##### Marker contributions to metabolic-age advance")
+        st.caption(
+            "Each bar = coefficient * (patient value - NHANES population mean) "
+            "in years. Positive (coral) = pulling metabolic age UP; negative (teal) "
+            "= pulling DOWN. Some signs (HDL, BMI, DBP) reflect within-NHANES "
+            "age-correlation rather than clinical desirability - see disclaimer below."
+        )
+        contribs = metabolic_contributions(hba1c_pa, total_chol_pa, hdl_pa,
+                                            bmi_pa, waist_pa, sbp_pa, dbp_pa)
+        cdf = pd.DataFrame([{"Marker": k, "Contribution (yrs)": v}
+                             for k, v in sorted(contribs.items(),
+                                                 key=lambda x: x[1], reverse=True)])
+        colors = [CORAL if v > 0 else TEAL for v in cdf["Contribution (yrs)"]]
+        fig = go.Figure(go.Bar(
+            x=cdf["Contribution (yrs)"], y=cdf["Marker"],
+            orientation='h', marker_color=colors,
+            text=[f"{v:+.2f}" for v in cdf["Contribution (yrs)"]],
+            textposition='outside',
+        ))
+        fig.add_vline(x=0, line_color='gray', line_width=1)
+        fig.update_layout(
+            xaxis_title='Contribution to metabolic-age advance (years)',
+            plot_bgcolor='white', paper_bgcolor='white',
+            font_color='#1A1A2E', height=320, margin=dict(l=140, t=10, b=40, r=20),
+        )
+        st.plotly_chart(fig, use_container_width=True, key='pa_metab_contrib')
+
+        # What-if simulator
+        st.markdown("##### Simulate intervention")
+        st.caption(
+            "Sliders default to current values. Move them to see how the metabolic "
+            "age advance would shift if the patient hit different targets."
+        )
+        msig = (hba1c_pa, total_chol_pa, hdl_pa, bmi_pa, waist_pa, sbp_pa, dbp_pa)
+        if st.session_state.get("pa_metab_baseline_sig") != msig:
+            st.session_state["pa_metab_baseline_sig"] = msig
+            for k, v in zip(("ms_hba1c","ms_chol","ms_hdl","ms_bmi","ms_waist","ms_sbp","ms_dbp"),
+                             msig):
+                st.session_state[k] = float(v)
+
+        ms1, ms2, ms3 = st.columns(3)
+        with ms1:
+            sim_hba1c = st.slider("HbA1c (%)", 4.0, 14.0, step=0.1, key="ms_hba1c")
+            sim_chol  = st.slider("Total cholesterol (mg/dL)", 100.0, 350.0, step=1.0, key="ms_chol")
+            sim_hdl   = st.slider("HDL (mg/dL)", 20.0, 120.0, step=1.0, key="ms_hdl")
+        with ms2:
+            sim_bmi   = st.slider("BMI (kg/m^2)", 18.0, 50.0, step=0.1, key="ms_bmi")
+            sim_waist = st.slider("Waist (cm)", 60.0, 160.0, step=0.5, key="ms_waist")
+        with ms3:
+            sim_sbp = st.slider("Systolic BP (mmHg)", 90.0, 200.0, step=1.0, key="ms_sbp")
+            sim_dbp = st.slider("Diastolic BP (mmHg)", 50.0, 120.0, step=1.0, key="ms_dbp")
+
+        m_sim_age = compute_metabolic_age(sim_hba1c, sim_chol, sim_hdl,
+                                            sim_bmi, sim_waist, sim_sbp, sim_dbp)
+        m_sim_advance = m_sim_age - age
+        m_change = m_advance - m_sim_advance
+        ms_color = TEAL if m_change > 0 else CORAL
+        sign_m = "-" if m_change > 0 else "+"
+
+        m_sim_ci = bootstrap_metabolic({
+            "hba1c": sim_hba1c, "total_cholesterol": sim_chol, "hdl": sim_hdl,
+            "bmi": sim_bmi, "waist_cm": sim_waist,
+            "systolic_mean": sim_sbp, "diastolic_mean": sim_dbp,
+        }, n_boot=300)
+
+        st.markdown(
+            f"<div style='background:#F2F4F8;border-left:4px solid {ms_color};"
+            f"padding:16px 20px;border-radius:4px;margin:16px 0;'>"
+            f"<div style='font-size:14px;color:#1A1A2E;'>"
+            f"<strong>Simulated metabolic age advance:</strong> "
+            f"<span style='color:{ms_color};font-size:20px;font-weight:700;'>{m_sim_advance:+.1f} years</span>"
+            f"&nbsp;<span style='color:#6B7280;font-size:13px;'>"
+            f"[CI {m_sim_ci['advance_lo']:+.1f}, {m_sim_ci['advance_hi']:+.1f}]</span>"
+            f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+            f"<strong>Change from baseline:</strong> "
+            f"<span style='color:{ms_color};font-size:20px;font-weight:700;'>{sign_m}{abs(m_change):.1f} years</span>"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        # Dual-CI plot
+        m_fig_ci = go.Figure()
+        m_fig_ci.add_trace(go.Scatter(
+            x=[m_ci['advance_lo'], m_ci['advance_hi']], y=[1, 1],
+            mode='lines', line=dict(color=NAVY, width=10),
+            name='Baseline 95% CI'))
+        m_fig_ci.add_trace(go.Scatter(
+            x=[m_advance], y=[1], mode='markers',
+            marker=dict(color=GOLD, size=18, line=dict(color=NAVY, width=2)),
+            showlegend=False))
+        m_fig_ci.add_trace(go.Scatter(
+            x=[m_sim_ci['advance_lo'], m_sim_ci['advance_hi']], y=[0, 0],
+            mode='lines', line=dict(color=ms_color, width=10),
+            name='Simulated 95% CI'))
+        m_fig_ci.add_trace(go.Scatter(
+            x=[m_sim_advance], y=[0], mode='markers',
+            marker=dict(color=GOLD, size=18, line=dict(color=ms_color, width=2)),
+            showlegend=False))
+        m_fig_ci.add_vline(x=0, line_dash='dash', line_color='gray',
+                            annotation_text='No advance', annotation_position='top')
+        m_no_overlap = (m_sim_ci['advance_hi'] < m_ci['advance_lo']) or                        (m_sim_ci['advance_lo'] > m_ci['advance_hi'])
+        m_verdict = ("Simulated CI does NOT overlap baseline CI - change exceeds lab noise."
+                      if m_no_overlap else
+                      "Simulated CI overlaps baseline CI - change is within lab noise.")
+        m_pad = max(2.0, abs(m_advance) * 0.5, abs(m_sim_advance) * 0.5)
+        m_x_lo = min(m_ci['advance_lo'], m_sim_ci['advance_lo']) - 1
+        m_x_hi = max(m_ci['advance_hi'], m_sim_ci['advance_hi']) + 1
+        m_fig_ci.update_layout(
+            height=180, plot_bgcolor='white', paper_bgcolor='white',
+            font_color='#1A1A2E',
+            xaxis=dict(title='Metabolic-age advance (years)',
+                        range=[min(m_x_lo, -m_pad), max(m_x_hi, m_pad)], zeroline=False),
+            yaxis=dict(visible=False, range=[-0.5, 1.5],
+                        tickvals=[0, 1], ticktext=['Simulated', 'Baseline']),
+            yaxis_showticklabels=True,
+            margin=dict(t=10, b=40, l=80, r=20),
+            legend=dict(orientation='h', y=-0.25),
+        )
+        st.plotly_chart(m_fig_ci, use_container_width=True, key='pa_metab_dualci')
+        st.caption(m_verdict)
+
+        st.caption(
+            "**Methodology note.** This metabolic clock is a within-NHANES "
+            "regression of chronological age on the 7 markers. Some coefficients "
+            "(HDL +, BMI -, DBP -) are counter-intuitive because of multivariate "
+            "age-confounding (e.g., DBP falls with vascular stiffening at older "
+            "ages, BMI peaks middle-age and falls). The clock validates against "
+            "mortality (HR=1.027/yr advance, C=0.835), but DO NOT use the simulator "
+            "as clinical advice. Lowering HDL or raising BMI to 'improve' metabolic "
+            "age is incorrect clinically; the model captures statistical age-pattern "
+            "matching, not health-outcome optimization. Use it for understanding "
+            "how a patient's metabolic profile compares to age peers."
         )
