@@ -156,7 +156,7 @@ st.markdown(
 # ---------------------------------------------------------------------------
 _PAGES = {
     "Dashboard": [
-        st.Page("home.py", title="Home",
+        st.Page("home.py", title="Registry Stats",
                  icon=":material/home:", default=True),
     ],
     "Cohort Explorers": [
