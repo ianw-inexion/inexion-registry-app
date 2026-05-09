@@ -40,7 +40,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Biomarker filters** (optional)")
 
-    # A curated set of high-value biomarker filters — keep UI clean, hide the long tail
     featured = [
         ("bmi", "BMI (kg/m²)", 12.0, 70.0, (12.0, 70.0)),
         ("systolic_mean", "Systolic BP (mmHg)", 70, 220, (70, 220)),
@@ -55,6 +54,18 @@ with st.sidebar:
         v = st.slider(label, lo, hi, default, key=f"f_{key}")
         if v != default:
             bio_filters[key] = v
+
+    st.markdown("---")
+    st.markdown("**Estimator**")
+    use_weights = st.toggle(
+        "Survey-weighted",
+        value=True,
+        key="nhanes_weighted",
+        help=(
+            "Use NHANES exam_weight_adj for population-representative estimates. "
+            "Off = raw sample averages."
+        ),
+    )
 
 # ── Compose the filter dict ──────────────────────────────────────────────────
 filters = {"cycle": cycles, "age": (age_min, age_max)}
@@ -88,8 +99,14 @@ if n == 0:
     st.stop()
 
 # Summary table
-st.markdown("### Descriptive summary")
-summary = data.cohort_summary(filters)
+est_label = "survey-weighted (population)" if use_weights else "unweighted (sample)"
+st.markdown(f"### Descriptive summary  ·  *{est_label}*")
+summary = data.cohort_summary(filters, weighted=use_weights)
+if use_weights and summary.get("effective_n"):
+    st.caption(
+        f"Effective n (Kish): {summary['effective_n']:,.0f}  ·  "
+        "Means use NHANES exam weights — flip the toggle to compare against raw sample averages."
+    )
 
 sc1, sc2, sc3, sc4 = st.columns(4)
 sc1.metric("Mean age", f"{summary['mean_age']:.1f}")
@@ -135,7 +152,7 @@ trend_col = st.selectbox(
     format_func=lambda k: (get_variable(k) or {}).get("label", k),
     key="trend",
 )
-trend = data.trend_by_cycle(trend_col, filters)
+trend = data.trend_by_cycle(trend_col, filters, weighted=use_weights)
 if len(trend):
     var_meta = get_variable(trend_col) or {}
     fig = px.line(

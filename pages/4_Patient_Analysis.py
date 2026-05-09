@@ -24,7 +24,7 @@ import plotly.express as px
 import streamlit as st
 from scipy import stats
 
-from src.bioage import compute_phenoage
+from src.bioage import compute_phenoage, bootstrap_phenoage
 from src.config import NAVY, GOLD, CORAL, TEAL, NHANES_PARQUET, data_exists
 
 st.set_page_config(page_title="Patient Analysis - INEXION Registry", layout="wide")
@@ -46,7 +46,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Shared session state defaults (single source of truth across all tabs)
+# Shared session state defaults
 DEFAULTS = {
     "pa_age":         50,
     "pa_sex":         "Male",
@@ -66,7 +66,7 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# PDF extraction (Claude Haiku) - shared across all three tabs
+# PDF extraction (Claude Haiku)
 def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
     try:
         import pdfplumber
@@ -114,10 +114,7 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        return {
-            "message": "ANTHROPIC_API_KEY not set in environment.",
-            "ok": False,
-        }
+        return {"message": "ANTHROPIC_API_KEY not set in environment.", "ok": False}
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -170,12 +167,9 @@ def extract_labs_from_pdf(pdf_bytes: bytes) -> dict:
         if missing:
             msg += f" Not found: {', '.join(missing)}. Enter these manually."
         return {"message": msg, "ok": True}
-    return {
-        "message": "No biomarker values could be extracted. The report may be image-based or use non-standard formatting.",
-        "ok": False,
-    }
+    return {"message": "No biomarker values could be extracted.", "ok": False}
 
-# Shared input section - one per page
+
 with st.expander("Upload lab report to auto-populate values", expanded=False):
     st.caption(
         "Upload a PDF lab report (Quest, LabCorp, hospital, or equivalent). "
@@ -204,10 +198,8 @@ st.caption(
 dcol, _ = st.columns([1, 2])
 with dcol:
     st.number_input("Age (years)", min_value=18, max_value=100, step=1, key="pa_age")
-    st.selectbox(
-        "Sex", ["Male", "Female"], key="pa_sex",
-        help="Used for normative reference percentile stratification.",
-    )
+    st.selectbox("Sex", ["Male", "Female"], key="pa_sex",
+                 help="Used for normative reference percentile stratification.")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -223,7 +215,6 @@ with c3:
     st.number_input("Alkaline phosphatase (U/L)", min_value=20.0, max_value=400.0, step=1.0, key="pa_alkphos")
     st.number_input("WBC (x1000/uL)",             min_value=2.0,  max_value=20.0,  step=0.1, key="pa_wbc")
 
-# Pull current values into local vars for the tabs
 age      = st.session_state["pa_age"]
 sex      = st.session_state["pa_sex"]
 albumin  = st.session_state["pa_albumin"]
@@ -236,7 +227,6 @@ rdw      = st.session_state["pa_rdw"]
 alkphos  = st.session_state["pa_alkphos"]
 wbc      = st.session_state["pa_wbc"]
 
-# Compute PhenoAge once - reused across tabs
 pa_result = compute_phenoage(
     age=age, albumin_g_dl=albumin, creatinine_mg_dl=creatinine,
     glucose_mg_dl=glucose, crp_mg_l=crp, lymphocyte_pct=lymph,
@@ -246,13 +236,23 @@ phenoage  = pa_result["phenoage"]
 delta     = pa_result["delta"]
 mortality = pa_result["mortality_10y"]
 
+# Bootstrap measurement-error CIs - cached on the input tuple
+@st.cache_data(show_spinner=False)
+def _boot_ci(age, albumin, creatinine, glucose, crp, lymph,
+             mcv, rdw, alkphos, wbc, n_boot=1000):
+    return bootstrap_phenoage(
+        age, albumin, creatinine, glucose, crp, lymph,
+        mcv, rdw, alkphos, wbc, n_boot=n_boot,
+    )
+
+ci = _boot_ci(age, albumin, creatinine, glucose, crp, lymph,
+              mcv, rdw, alkphos, wbc)
+
 st.markdown("---")
 
 tabs = st.tabs(["Biological Age", "Normative Reference", "Intervention Simulator"])
 
-# =============================================================================
 # TAB 1 - BIOLOGICAL AGE
-# =============================================================================
 with tabs[0]:
     delta_color = TEAL if delta <= 0 else CORAL
     delta_label = "biologically younger" if delta <= 0 else "biologically older"
@@ -266,16 +266,56 @@ with tabs[0]:
             <div style='font-size:56px; font-weight:800; margin-top:6px;'>
                 {phenoage:.1f} <span style='color:{GOLD}; font-size:28px;'>years</span>
             </div>
-            <div style='font-size:18px; color:{delta_color}; margin-top:8px; font-weight:600;'>
+            <div style='font-size:14px; color:#C9CBD4; margin-top:4px;'>
+                95% CI [{ci['phenoage_lo']:.1f}, {ci['phenoage_hi']:.1f}]
+                &nbsp;-&nbsp; analytical measurement-error bootstrap, n={ci['n_boot']}
+            </div>
+            <div style='font-size:18px; color:{delta_color}; margin-top:14px; font-weight:600;'>
                 {delta:+.1f} years - {delta_label} than chronological age
             </div>
+            <div style='font-size:14px; color:#C9CBD4; margin-top:4px;'>
+                95% CI [{ci['delta_lo']:+.1f}, {ci['delta_hi']:+.1f}] years
+            </div>
             <div style='font-size:13px; color:#C9CBD4; margin-top:14px;'>
-                Estimated 10-year mortality risk (Gompertz model): {mortality * 100:.2f}%
+                Estimated 10-year mortality risk (Gompertz):
+                {mortality * 100:.2f}%
+                &nbsp;[{ci['mort_lo']*100:.2f}%, {ci['mort_hi']*100:.2f}%]
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    fig_ci = go.Figure()
+    fig_ci.add_trace(go.Scatter(
+        x=[ci['delta_lo'], ci['delta_hi']], y=[0, 0],
+        mode='lines',
+        line=dict(color=NAVY, width=8),
+        name='95% measurement-error CI',
+    ))
+    fig_ci.add_trace(go.Scatter(
+        x=[delta], y=[0],
+        mode='markers',
+        marker=dict(color=GOLD, size=18, line=dict(color=NAVY, width=2)),
+        name='Point estimate',
+    ))
+    fig_ci.add_vline(x=0, line_dash='dash', line_color='gray',
+                     annotation_text='Chronological = biological',
+                     annotation_position='top')
+    pad = max(2.0, abs(delta) * 0.5)
+    fig_ci.update_layout(
+        height=140,
+        plot_bgcolor='white', paper_bgcolor='white', font_color='#1A1A2E',
+        showlegend=False,
+        xaxis=dict(
+            title='PhenoAge delta (years younger / older than chronological age)',
+            range=[min(ci['delta_lo'], -pad) - 1, max(ci['delta_hi'], pad) + 1],
+            zeroline=False,
+        ),
+        yaxis=dict(visible=False, range=[-1, 1]),
+        margin=dict(t=10, b=40, l=20, r=20),
+    )
+    st.plotly_chart(fig_ci, use_container_width=True, key='pa_delta_ci')
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -297,12 +337,12 @@ with tabs[0]:
     st.caption(
         "PhenoAge is a research instrument validated on NHANES population data (Levine et al., 2018). "
         "It is not a clinical diagnostic. A +3 year delta means biomarkers statistically resemble "
-        "those of a 3-year-older population mean - not that any individual 'is' biologically 3 years older."
+        "those of a 3-year-older population mean - not that any individual 'is' biologically 3 years older. "
+        "95% CIs are Monte-Carlo bootstrap (n=1000) using CAP/CLIA analytical CVs - "
+        "they reflect lab measurement noise on a re-draw, not population variability."
     )
 
-# =============================================================================
 # TAB 2 - NORMATIVE REFERENCE
-# =============================================================================
 with tabs[1]:
     @st.cache_data
     def load_reference():
@@ -318,7 +358,6 @@ with tabs[1]:
     if ref.empty:
         st.warning("NHANES reference parquet not found - normative percentile unavailable.")
     else:
-        # Match age decade x sex
         age_for_match = max(20, min(85, age))
         age_bin = (age_for_match // 10) * 10
         age_bin = max(20, min(80, age_bin))
@@ -352,11 +391,11 @@ with tabs[1]:
             f"{direction} than {100 - percentile:.0f}% of their peers."
         )
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Percentile", f"{percentile:.0f}th")
-        c2.metric("Reference group", f"{sex}s {age_lo}-{age_hi}")
-        c3.metric("Reference n", f"{n_ref:,}")
-        c4.metric("Group mean delta", f"{deltas.mean():+.2f} yrs")
+        cA, cB, cC, cD = st.columns(4)
+        cA.metric("Percentile", f"{percentile:.0f}th")
+        cB.metric("Reference group", f"{sex}s {age_lo}-{age_hi}")
+        cC.metric("Reference n", f"{n_ref:,}")
+        cD.metric("Group mean delta", f"{deltas.mean():+.2f} yrs")
 
         st.markdown(
             f"<div style='background:#F2F4F8;border-left:4px solid {pct_color};"
@@ -405,11 +444,8 @@ with tabs[1]:
         st.dataframe(pd.DataFrame(pct_rows), use_container_width=True,
                      hide_index=True, key="pa_pct_table")
 
-# =============================================================================
 # TAB 3 - INTERVENTION SIMULATOR
-# =============================================================================
 with tabs[2]:
-    # PhenoAge regression coefficients (Levine 2018) - SI units in xb
     COEFFS = {
         'albumin':    -0.03359355,
         'creatinine':  0.009506491,
@@ -517,7 +553,6 @@ with tabs[2]:
         )
         st.plotly_chart(fig, use_container_width=True, key="pa_contrib_bar")
 
-        # Highlight top targets
         positive = contrib_df[contrib_df['Contribution (yrs)'] > 0].head(3)
         if len(positive) > 0:
             names = ', '.join(positive['Biomarker'].tolist())
@@ -534,9 +569,6 @@ with tabs[2]:
             "Sliders default to the patient's current values from the inputs above."
         )
 
-        # Slider keys are *separate* from the master inputs so the patient's
-        # baseline isn't overwritten by simulator tinkering.  When the master
-        # inputs change (new patient, new PDF), reset the sliders.
         slider_init = {
             "sl_alb": albumin, "sl_crt": creatinine, "sl_glc": glucose,
             "sl_crp": crp, "sl_lym": lymph, "sl_mcv": mcv,
@@ -617,12 +649,19 @@ with tabs[2]:
         imp_color = TEAL if improvement > 0 else CORAL
         sign = "-" if improvement > 0 else "+"
 
+        # Bootstrap CI on the simulated delta too, so the user can see whether
+        # the simulated change is meaningful relative to lab noise.
+        sim_ci = _boot_ci(age, sim_albumin, sim_creatinine, sim_glucose, sim_crp,
+                          sim_lymph, sim_mcv, sim_rdw, sim_alkphos, sim_wbc, n_boot=500)
+
         st.markdown(
             f"<div style='background:#F2F4F8;border-left:4px solid {imp_color};"
             f"padding:16px 20px;border-radius:4px;margin:16px 0;'>"
             f"<div style='font-size:14px;color:#1A1A2E;'>"
             f"<strong>Simulated PhenoAge delta:</strong> "
             f"<span style='color:{imp_color};font-size:20px;font-weight:700;'>{delta_sim:+.1f} years</span>"
+            f"&nbsp;<span style='color:#6B7280;font-size:13px;'>"
+            f"[CI {sim_ci['delta_lo']:+.1f}, {sim_ci['delta_hi']:+.1f}]</span>"
             f"&nbsp;&nbsp;|&nbsp;&nbsp;"
             f"<strong>Change from baseline:</strong> "
             f"<span style='color:{imp_color};font-size:20px;font-weight:700;'>{sign}{abs(improvement):.1f} years</span>"
@@ -633,5 +672,6 @@ with tabs[2]:
         st.caption(
             "PhenoAge: Levine et al., Aging Cell 2018. Contributions computed as "
             "coefficient * (patient_value - NHANES population mean). "
+            "Simulated delta CI uses the same n=500 measurement-error bootstrap as Tab 1. "
             "This tool is for research and clinical exploration - not a diagnostic instrument."
         )

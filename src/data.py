@@ -20,10 +20,8 @@ def get_connection():
     """One DuckDB connection per Streamlit session. Registers the parquet as a view."""
     from .config import IS_S3
     con = duckdb.connect(database=":memory:")
-    # Build path string — works for both local Path objects and S3 URIs
     if IS_S3:
         parquet_path = str(NHANES_PARQUET)
-        # Install and load httpfs for S3 access
         try:
             con.execute("INSTALL httpfs; LOAD httpfs;")
             import os
@@ -100,27 +98,67 @@ def cohort_preview(filters: dict[str, Any], limit: int = 500) -> pd.DataFrame:
     return con.execute(q, params).df()
 
 
-def cohort_summary(filters: dict[str, Any]) -> dict[str, Any]:
-    """Descriptive summary for the cohort."""
+def cohort_summary(filters: dict[str, Any], weighted: bool = False) -> dict[str, Any]:
+    """
+    Descriptive summary for the cohort.
+
+    weighted=True applies NHANES exam_weight_adj (interview/exam sample weight,
+    divided by number of cycles spanned). Means become survey-weighted —
+    nationally representative population estimates, not sample averages.
+    Counts (n) remain raw sample counts.
+    """
     con = get_connection()
     where, params = _build_where(filters)
-    q = f"""
-        SELECT
-            COUNT(*) AS n,
-            AVG(age)                           AS mean_age,
-            AVG(CASE WHEN sex = 2 THEN 1.0 ELSE 0.0 END) AS pct_female,
-            AVG(bmi)                           AS mean_bmi,
-            AVG(phenoage)                      AS mean_phenoage,
-            AVG(phenoage_delta)                AS mean_phenoage_delta,
-            STDDEV(phenoage_delta)             AS sd_phenoage_delta,
-            AVG(kdm_bioage)                    AS mean_kdm,
-            AVG(kdm_advance)                   AS mean_kdm_advance,
-            AVG(systolic_mean)                 AS mean_systolic,
-            AVG(glucose_biopro)                AS mean_glucose,
-            AVG(crp)                           AS mean_crp,
-            AVG(hba1c)                         AS mean_hba1c
-        FROM nhanes{where}
-    """
+
+    if weighted:
+        def wm(col: str) -> str:
+            return (
+                f"SUM(CASE WHEN {col} IS NOT NULL AND exam_weight_adj > 0 "
+                f"THEN ({col}) * exam_weight_adj ELSE 0 END) / "
+                f"NULLIF(SUM(CASE WHEN {col} IS NOT NULL AND exam_weight_adj > 0 "
+                f"THEN exam_weight_adj ELSE 0 END), 0)"
+            )
+
+        q = f"""
+            SELECT
+                COUNT(*) AS n,
+                {wm('age')}                                       AS mean_age,
+                {wm('CAST(CASE WHEN sex = 2 THEN 1.0 ELSE 0.0 END AS DOUBLE)')} AS pct_female,
+                {wm('bmi')}                                       AS mean_bmi,
+                {wm('phenoage')}                                  AS mean_phenoage,
+                {wm('phenoage_delta')}                            AS mean_phenoage_delta,
+                STDDEV(phenoage_delta)                            AS sd_phenoage_delta,
+                {wm('kdm_bioage')}                                AS mean_kdm,
+                {wm('kdm_advance')}                               AS mean_kdm_advance,
+                {wm('systolic_mean')}                             AS mean_systolic,
+                {wm('glucose_biopro')}                            AS mean_glucose,
+                {wm('crp')}                                       AS mean_crp,
+                {wm('hba1c')}                                     AS mean_hba1c,
+                POWER(SUM(exam_weight_adj), 2) /
+                    NULLIF(SUM(exam_weight_adj * exam_weight_adj), 0) AS effective_n,
+                'weighted'                                        AS estimator
+            FROM nhanes{where}
+        """
+    else:
+        q = f"""
+            SELECT
+                COUNT(*) AS n,
+                AVG(age)                           AS mean_age,
+                AVG(CASE WHEN sex = 2 THEN 1.0 ELSE 0.0 END) AS pct_female,
+                AVG(bmi)                           AS mean_bmi,
+                AVG(phenoage)                      AS mean_phenoage,
+                AVG(phenoage_delta)                AS mean_phenoage_delta,
+                STDDEV(phenoage_delta)             AS sd_phenoage_delta,
+                AVG(kdm_bioage)                    AS mean_kdm,
+                AVG(kdm_advance)                   AS mean_kdm_advance,
+                AVG(systolic_mean)                 AS mean_systolic,
+                AVG(glucose_biopro)                AS mean_glucose,
+                AVG(crp)                           AS mean_crp,
+                AVG(hba1c)                         AS mean_hba1c,
+                CAST(COUNT(*) AS DOUBLE)           AS effective_n,
+                'unweighted'                       AS estimator
+            FROM nhanes{where}
+        """
     row = con.execute(q, params).df().iloc[0].to_dict()
     return row
 
@@ -145,21 +183,35 @@ def distribution(col: str, filters: dict[str, Any], bin_count: int = 40) -> pd.D
     return con.execute(q, params).df()
 
 
-def trend_by_cycle(col: str, filters: dict[str, Any]) -> pd.DataFrame:
+def trend_by_cycle(col: str, filters: dict[str, Any], weighted: bool = False) -> pd.DataFrame:
     con = get_connection()
     where, params = _build_where(filters)
     glue = "AND" if where else "WHERE"
-    q = f"""
-        SELECT
-            cycle,
-            COUNT(*) AS n,
-            AVG({col}) AS mean_value,
-            MEDIAN({col}) AS median_value
-        FROM nhanes{where}
-        {glue} {col} IS NOT NULL
-        GROUP BY cycle
-        ORDER BY cycle
-    """
+
+    if weighted:
+        q = f"""
+            SELECT
+                cycle,
+                COUNT(*) AS n,
+                SUM({col} * exam_weight_adj) / NULLIF(SUM(exam_weight_adj), 0) AS mean_value,
+                MEDIAN({col}) AS median_value
+            FROM nhanes{where}
+            {glue} {col} IS NOT NULL AND exam_weight_adj > 0
+            GROUP BY cycle
+            ORDER BY cycle
+        """
+    else:
+        q = f"""
+            SELECT
+                cycle,
+                COUNT(*) AS n,
+                AVG({col}) AS mean_value,
+                MEDIAN({col}) AS median_value
+            FROM nhanes{where}
+            {glue} {col} IS NOT NULL
+            GROUP BY cycle
+            ORDER BY cycle
+        """
     return con.execute(q, params).df()
 
 
