@@ -10,7 +10,10 @@ from src.config import (
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET,
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET, MIDUS_CODEBOOK_PARQUET,
     BRFSS_STATE_PARQUET, BRFSS_METRO_PARQUET,
+    NHANES_MORTALITY_PARQUET, HRS_MORTALITY_PARQUET, MIDUS_MORTALITY_PARQUET,
+    data_exists,
 )
+import pandas as pd
 from src import data
 
 st.set_page_config(page_title="Admin - INEXION Registry", layout="wide")
@@ -58,6 +61,9 @@ ALL_FILES = [
     ("HRS DBS Longitudinal (2006-2016)",     HRS_DBS_PARQUET,         "HRS"),
     ("HRS Epigenetic Clocks",                HRS_EPIGEN_PARQUET,      "HRS"),
     ("HRS Pace of Aging (DunedinPACE)",      HRS_POA_PARQUET,         "HRS"),
+    ("HRS RAND mortality (death dates)",     HRS_MORTALITY_PARQUET,   "HRS"),
+    ("NHANES Linked Mortality (LMF 2019)",   NHANES_MORTALITY_PARQUET,"NHANES"),
+    ("MIDUS NDI mortality (37237 + 38024)",  MIDUS_MORTALITY_PARQUET, "MIDUS"),
     ("MIDUS Biomarker (M2 + R1 + M3)",       MIDUS_BIO_PARQUET,       "MIDUS"),
     ("MIDUS 3 Cognitive (BTACT)",            MIDUS_COG_PARQUET,       "MIDUS"),
     ("MIDUS variable codebook",              MIDUS_CODEBOOK_PARQUET,  "MIDUS"),
@@ -105,6 +111,53 @@ try:
     c4.metric("Cycle range", f"{int(stats['min_year'])}-{int(stats['max_year'])}")
 except Exception as e:
     st.error(f"Coverage query failed: {e}")
+
+# Mortality coverage snapshot
+st.markdown("---")
+st.markdown("### Mortality Outcome Coverage")
+mort_rows = []
+def _summ(label, path, status_col, time_col, baseline_label):
+    if not data_exists(path):
+        return {"Cohort": label, "n": "-", "Deaths": "-", "Death rate": "-",
+                "Median follow-up (yrs)": "-", "Baseline": baseline_label, "Status": "MISSING"}
+    df = pd.read_parquet(path, columns=[status_col, time_col])
+    df = df.dropna(subset=[status_col])
+    n = len(df)
+    deaths = int(df[status_col].sum())
+    median_t = float(df[time_col].median()) if time_col in df.columns else None
+    return {
+        "Cohort": label, "n": f"{n:,}", "Deaths": f"{deaths:,}",
+        "Death rate": f"{100*deaths/n:.1f}%" if n else "-",
+        "Median follow-up (yrs)": f"{median_t:.1f}" if median_t is not None else "-",
+        "Baseline": baseline_label, "Status": "OK",
+    }
+
+try:
+    from src.config import (NHANES_MORTALITY_PARQUET as _NMP,
+                             HRS_VBS_PARQUET as _HVBS,
+                             HRS_PUBLIC_PARQUET as _HPUB,
+                             HRS_MORTALITY_PARQUET as _HMP,
+                             MIDUS_BIO_PARQUET as _MBP)
+    mort_rows.append(_summ("NHANES (LMF, censor 2019-12-31)",
+                            _NMP, "mortality_status", "years_int_to_event",
+                            "interview date"))
+    mort_rows.append(_summ("HRS VBS (RAND mortality, censor 2023-01-01)",
+                            _HVBS, "mortality_status", "years_to_event",
+                            "2016.5 (Wave 13)"))
+    mort_rows.append(_summ("HRS Public 2016 (RAND mortality)",
+                            _HPUB, "mortality_status", "years_to_event",
+                            "2016.5"))
+    mort_rows.append(_summ("MIDUS Biomarker (NDI 37237 + 38024)",
+                            _MBP, "mortality_status", "years_to_event",
+                            "wave-mid"))
+    st.dataframe(pd.DataFrame(mort_rows), use_container_width=True, hide_index=True)
+    st.caption(
+        "NHANES Linked Mortality Files cover NHANES 1999-2018 with follow-up through 2019-12-31. "
+        "HRS mortality from RAND HRS Longitudinal File 1992-2022 (death year + month). "
+        "MIDUS NDI (ICPSR 37237 Core + 38024 Refresher 1) is public download but not yet ingested."
+    )
+except Exception as _e:
+    st.error(f"Mortality coverage error: {_e}")
 
 # App inventory
 st.markdown("---")

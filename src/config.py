@@ -47,6 +47,9 @@ def data_exists(path) -> bool:
 DATA_DIR = Path(_DATA_DIR_RAW) if not IS_S3 else _DATA_DIR_RAW
 
 NHANES_PARQUET       = _dp("nhanes_with_phenoage.parquet")
+NHANES_MORTALITY_PARQUET = _dp("nhanes_with_mortality.parquet")
+HRS_MORTALITY_PARQUET    = _dp("hrs_mortality.parquet")
+MIDUS_MORTALITY_PARQUET  = _dp("midus_mortality.parquet")
 BRFSS_STATE_PARQUET  = _dp("brfss_state_scores.parquet")
 BRFSS_METRO_PARQUET  = _dp("brfss_metro_scores.parquet")
 NHANES_HARMONIZED    = _dp("nhanes_harmonized.parquet")
