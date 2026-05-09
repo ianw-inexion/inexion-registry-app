@@ -79,31 +79,11 @@ st.markdown(
             display: block !important;
         }}
 
-        /* SECTION HEADERS - target every plausible Streamlit DOM shape.
-           Explicit coverage for both expanded (<details open>) AND
-           collapsed (<details>) summary elements; plus the JS-tagged
-           .inexion-section-header class added by the script below as a
-           guaranteed fallback. */
-        .inexion-section-header,
-        [data-testid="stSidebarNav"] details[open] > summary,
-        [data-testid="stSidebarNav"] details:not([open]) > summary,
-        [data-testid="stSidebarNav"] summary,
-        [data-testid="stSidebarNav"] details > summary,
-        [data-testid="stSidebarNav"] [data-testid="stSidebarNavSeparator"],
-        [data-testid="stSidebarNav"] [data-testid*="GroupHeader"],
-        [data-testid="stSidebarNav"] [data-testid*="Group"],
-        [data-testid="stSidebarNav"] li > summary,
-        [data-testid="stSidebarNav"] li > div:not(:has(a)),
-        [data-testid="stSidebarNav"] li > span:not(:has(a)),
-        [data-testid="stSidebarNav"] [role="heading"],
-        [data-testid="stSidebarNav"] h1,
-        [data-testid="stSidebarNav"] h2,
-        [data-testid="stSidebarNav"] h3,
-        [data-testid="stSidebarNav"] section > h2,
-        [data-testid="stSidebarNav"] section > div:not(:has(a)):first-child,
-        [data-testid="stSidebarNav"] > ul > div:not(:has(a)),
-        [data-testid="stSidebarNav"] > ul > li > div:not(:has(a)):first-child,
-        [data-testid="stSidebarNav"] > div > div > div:first-child:not(:has(a)) {{
+        /* SECTION HEADERS - styling is keyed off the .inexion-section-header
+           class added by JS below. Streamlit's emotion-cache class names
+           change between versions, so we tag headers by behavior
+           (cursor:pointer, no descendant <a>) rather than tag/class names. */
+        .inexion-section-header {{
             text-transform: uppercase !important;
             letter-spacing: 1.5px !important;
             font-size: 13px !important;
@@ -113,32 +93,17 @@ st.markdown(
             padding: 10px 16px !important;
             border-radius: 4px !important;
             margin: 14px 8px 4px 8px !important;
-            display: block !important;
             list-style: none !important;
         }}
 
-        /* And every text-bearing descendant of those header containers */
-        [data-testid="stSidebarNav"] summary *,
-        [data-testid="stSidebarNav"] li > div:not(:has(a)) *,
-        [data-testid="stSidebarNav"] [role="heading"] *,
-        [data-testid="stSidebarNav"] h2 *,
-        [data-testid="stSidebarNav"] h3 * {{
+        /* Inner <p>/<span> labels inherit the header look */
+        .inexion-section-header * {{
             text-transform: uppercase !important;
             font-size: 13px !important;
             font-weight: 800 !important;
             letter-spacing: 1.5px !important;
             color: {NAVY} !important;
             background-color: transparent !important;
-        }}
-
-        /* Strip default summary triangle marker so headers look clean */
-        [data-testid="stSidebarNav"] summary::-webkit-details-marker,
-        [data-testid="stSidebarNav"] summary::marker {{
-            display: none !important;
-        }}
-        [data-testid="stSidebarNav"] summary {{
-            list-style: none !important;
-            cursor: default !important;
         }}
 
         /* Nav link rows - rest state */
@@ -247,28 +212,47 @@ _PAGES = {
 
 pg = st.navigation(_PAGES, position="sidebar", expanded=True)
 
-# JS fallback - tag every section header in the sidebar nav with the
-# .inexion-section-header class so CSS styling reliably hits them.
+# JS - tag every section-header element with .inexion-section-header.
+# Detection is behavioral: an element is a section header iff it has
+# cursor:pointer AND contains no <a> descendant AND isn't inside an <a>.
+# This is independent of Streamlit's volatile emotion-cache class names
+# and works for both expanded and collapsed sections.
 import streamlit.components.v1 as components
 components.html(
     """
     <script>
     (function() {
+        const parentDoc = window.parent.document;
+        const parentWin = window.parent;
         const tag = () => {
-            const root = window.parent.document;
-            const nav = root.querySelector('[data-testid="stSidebarNav"]');
+            const nav = parentDoc.querySelector('[data-testid="stSidebarNav"]');
             if (!nav) return;
-            const candidates = nav.querySelectorAll('summary, li > div, li > span, [role="heading"], h2, h3');
-            candidates.forEach(el => {
+            const all = nav.querySelectorAll('*');
+            all.forEach(el => {
+                if (el.classList.contains('inexion-section-header')) return;
+                if (el.tagName === 'A') return;
                 if (el.querySelector('a')) return;
                 if (el.closest('a')) return;
-                el.classList.add('inexion-section-header');
+                const cs = parentWin.getComputedStyle(el);
+                if (cs && cs.cursor === 'pointer') {
+                    el.classList.add('inexion-section-header');
+                }
             });
         };
         tag();
-        const obs = new MutationObserver(tag);
-        const target = window.parent.document.querySelector('[data-testid="stSidebar"]');
-        if (target) obs.observe(target, {childList: true, subtree: true});
+        // Re-tag whenever Streamlit re-renders any part of the sidebar
+        const sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
+        if (sidebar) {
+            const obs = new MutationObserver(() => {
+                // Defer one frame so emotion classes settle before measuring
+                requestAnimationFrame(tag);
+            });
+            obs.observe(sidebar, {childList: true, subtree: true});
+        }
+        // Safety net: re-tag a few times after initial load
+        setTimeout(tag, 100);
+        setTimeout(tag, 400);
+        setTimeout(tag, 1000);
     })();
     </script>
     """,
