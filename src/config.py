@@ -62,6 +62,8 @@ MIDUS_BIO_PARQUET    = _dp("midus_biomarker.parquet")
 MIDUS_COG_PARQUET    = _dp("midus_cognitive_m3.parquet")
 MIDUS_CODEBOOK_PARQUET = _dp("midus_codebook.parquet")
 HEADLINE_DIR         = _dp("headline_analyses")
+ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
+ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")
 
 # App metadata
 APP_TITLE = "INEXION Longevity Registry"
