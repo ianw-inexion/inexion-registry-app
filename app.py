@@ -234,9 +234,16 @@ components.html(
                 if (el.querySelector('a')) return;
                 if (el.closest('a')) return;
                 const cs = parentWin.getComputedStyle(el);
-                if (cs && cs.cursor === 'pointer') {
-                    el.classList.add('inexion-section-header');
+                if (!cs || cs.cursor !== 'pointer') return;
+                // Only tag the OUTERMOST cursor:pointer element. cursor is
+                // inherited so every descendant of a toggle div also reports
+                // pointer; tagging them stacks padding/margin and hides text.
+                const parent = el.parentElement;
+                if (parent && parent !== nav) {
+                    const pcs = parentWin.getComputedStyle(parent);
+                    if (pcs && pcs.cursor === 'pointer') return;
                 }
+                el.classList.add('inexion-section-header');
             });
         };
         tag();
