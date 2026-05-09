@@ -480,22 +480,31 @@ with tabs[5]:
                 ("wordlist_total_unique", "Word recall (unique)"),
                 ("digit_span_back_score", "Digit span backward"),
                 ("category_fluency_unique","Category fluency"),
-                ("number_series_first_pass","Number series"),
+                ("number_series_total",     "Number series total (BTACT)"),
             ]
             corr_rows = []
             for col, label in cog_outcomes:
                 if col not in merged.columns:
                     continue
+                # Coerce to numeric defensively - some BTACT vars come through as
+                # ICPSR factor categoricals ("(1) YES" / "(2) NO" etc.).
+                y_num = pd.to_numeric(merged[col], errors="coerce")
                 for biom in ["kdm_advance","crp_mg_l","il6_msd","hba1c_pct"]:
-                    sub = merged[[col, biom]].dropna()
-                    if len(sub) < 30:
+                    if biom not in merged.columns:
                         continue
-                    x = sub[biom].values
+                    x_num = pd.to_numeric(merged[biom], errors="coerce")
+                    pair = pd.DataFrame({"y": y_num, "x": x_num}).dropna()
+                    if len(pair) < 30:
+                        continue
+                    xv = pair["x"].values.astype(float)
+                    yv = pair["y"].values.astype(float)
                     if biom in ("crp_mg_l","il6_msd"):
-                        x = np.log(np.maximum(x.astype(float), 1e-3))
-                    r = float(np.corrcoef(x, sub[col])[0,1])
+                        xv = np.log(np.maximum(xv, 1e-3))
+                    if np.std(xv) == 0 or np.std(yv) == 0:
+                        continue
+                    r = float(np.corrcoef(xv, yv)[0,1])
                     corr_rows.append({"Cognitive outcome": label, "Biomarker": biom,
-                                       "n": len(sub), "r": round(r, 3)})
+                                       "n": len(pair), "r": round(r, 3)})
             if corr_rows:
                 st.dataframe(pd.DataFrame(corr_rows), use_container_width=True, hide_index=True)
 
