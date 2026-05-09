@@ -1,12 +1,15 @@
 """
 Research Hypothesis Workbench - test associations without writing Python.
 
-Select exposure, outcome, covariates, and dataset. Get partial correlations,
-regression coefficients, and scatter plots. NHANES + HRS + MIDUS.
+Models supported:
+  - OLS (linear regression with partial correlation)
+  - Cox PH (univariate / age-adjusted survival)
+  - Logistic (binary outcomes - OR + AUC)
+  - Mixed-effects (random-intercept linear model for longitudinal data)
+  - GAM (smooth term on the exposure with optional linear covariates)
 
-Session log: every Run captures the test in a per-session log. Benjamini-
-Hochberg FDR adjustment is applied across the log so you can see which of
-your hypotheses survive multiple-comparison correction.
+All five models append to a uniform session log that supports BH-FDR
+correction across heterogeneous tests.
 """
 import time
 import streamlit as st
@@ -18,6 +21,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from src.config import (data_exists, NAVY, GOLD, CORAL, TEAL,
                         NHANES_PARQUET, HRS_VBS_PARQUET, HRS_PUBLIC_PARQUET,
+                        HRS_DBS_PARQUET, NHANES_MORTALITY_PARQUET,
                         MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET)
 
 st.set_page_config(page_title="Research Workbench - INEXION Registry", layout="wide")
@@ -30,46 +34,56 @@ st.markdown(
         <div style='color:white;font-size:26px;font-weight:700;margin-top:4px;'>
             Research Hypothesis Workbench</div>
         <div style='color:#C9CBD4;font-size:13px;margin-top:6px;'>
-            Test associations without writing Python - Partial correlations - OLS regression - Session log + BH-FDR
+            OLS - Cox PH - Logistic - Mixed-effects - GAM &nbsp;|&nbsp;
+            BH-FDR session log
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+
+# ===========================================================================
 # Variable dictionaries
+# ===========================================================================
 NHANES_VARS = {
-    'phenoage_delta':    'PhenoAge Delta (biological age acceleration, yrs)',
-    'phenoage':          'PhenoAge (biological age, yrs)',
+    'phenoage_delta':    'PhenoAge Delta (yrs)',
+    'phenoage':          'PhenoAge (yrs)',
     'kdm_advance':       'KDM Biological Age Advance (yrs)',
-    'crp':               'CRP - C-Reactive Protein (mg/L)',
+    'liver_advance':     'Liver Age advance (yrs)',
+    'kidney_advance':    'Kidney Age advance (yrs)',
+    'metabolic_advance': 'Metabolic Age advance (yrs)',
+    'crp':               'CRP (mg/L)',
     'hba1c':             'HbA1c (%)',
     'albumin':           'Albumin (g/dL)',
-    'rdw':               'RDW - Red Cell Distribution Width (%)',
-    'wbc':               'WBC - White Blood Cell Count (x1000/uL)',
-    'lymphocyte_pct':    'Lymphocyte Percentage (%)',
+    'rdw':               'RDW (%)',
+    'wbc':               'WBC (x1000/uL)',
+    'lymphocyte_pct':    'Lymphocyte %',
     'creatinine':        'Creatinine (mg/dL)',
     'alkaline_phosphatase': 'Alkaline Phosphatase (U/L)',
-    'mcv':               'MCV - Mean Corpuscular Volume (fL)',
+    'mcv':               'MCV (fL)',
     'hdl':               'HDL Cholesterol (mg/dL)',
     'total_cholesterol': 'Total Cholesterol (mg/dL)',
     'fasting_glucose':   'Fasting Glucose (mg/dL)',
     'bmi':               'BMI (kg/m^2)',
-    'systolic_mean':     'Systolic Blood Pressure (mmHg)',
-    'diastolic_mean':    'Diastolic Blood Pressure (mmHg)',
-    'homa_ir':           'HOMA-IR (insulin resistance)',
+    'systolic_mean':     'Systolic BP (mmHg)',
+    'diastolic_mean':    'Diastolic BP (mmHg)',
+    'homa_ir':           'HOMA-IR',
     'waist_cm':          'Waist Circumference (cm)',
+    'egfr':              'eGFR (CKD-EPI 2021)',
     'age':               'Age (years)',
-    'sex':               'Sex (1=Male, 2=Female)',
+    'sex':               'Sex (1=M, 2=F)',
     'race_ethnicity':    'Race/Ethnicity',
     'education':         'Education (years)',
     'income_ratio':      'Income-to-Poverty Ratio',
     'cycle_start_year':  'NHANES Cycle Year',
+    'mortality_status':  'Mortality status (0/1)',
+    'years_to_event':    'Years to event (or censor)',
 }
 
 HRS_VARS = {
-    'phenoage_delta':         'PhenoAge Delta (biological age acceleration, yrs)',
-    'phenoage':               'PhenoAge (biological age, yrs)',
+    'phenoage_delta':         'PhenoAge Delta (yrs)',
+    'phenoage':               'PhenoAge (yrs)',
     'palb':                   'Albumin (g/dL) - VBS',
     'pcr':                    'Creatinine (mg/dL) - VBS',
     'pgluff':                 'Glucose (mg/dL) - VBS',
@@ -80,7 +94,9 @@ HRS_VARS = {
     'palkp2':                 'Alkaline Phosphatase (U/L) - VBS',
     'pwbc':                   'WBC (x1000/uL) - VBS',
     'r13agey_b':              'Age (years)',
-    'ragender':               'Sex (1=Male, 2=Female)',
+    'ragender':               'Sex (1=M, 2=F)',
+    'mortality_status':       'Mortality status (0/1)',
+    'years_to_event':         'Years to event',
 }
 
 HRS_SURVEY_VARS = {
@@ -93,25 +109,45 @@ HRS_SURVEY_VARS = {
     'walking_difficulty':     'Walking Difficulty (0/1)',
     'condition_count':        'Chronic Condition Count (0-6)',
     'cesd_depression':        'CESD Depression Score (0-8)',
-    'self_rated_health':      'Self-Rated Health (1=excellent, 5=poor)',
+    'self_rated_health':      'Self-Rated Health (1-5)',
     'bmi_self_report':        'BMI (self-report)',
     'age':                    'Age (years)',
     'sex':                    'Sex (Male/Female)',
     'education_years':        'Education (years)',
+    'current_smoker':         'Current smoker (0/1)',
+    'ever_smoked':            'Ever smoked (0/1)',
+    'hypertension':           'Hypertension (0/1)',
+    'diabetes':               'Diabetes (0/1)',
+    'heart_disease':          'Heart disease (0/1)',
+    'stroke':                 'Stroke (0/1)',
+    'arthritis':              'Arthritis (0/1)',
+    'lung_disease':           'Lung disease (0/1)',
+}
+
+DBS_VARS = {
+    'hhidpn':     'Respondent ID (grouping)',
+    'wave_year':  'Wave year',
+    'hba1c':      'HbA1c (%)',
+    'crp':        'CRP (mg/L)',
+    'hdl':        'HDL (mg/dL)',
+    'total_chol': 'Total Cholesterol (mg/dL)',
+    'cystatin_c': 'Cystatin-C (mg/L)',
 }
 
 MIDUS_VARS = {
-    'kdm_advance':              'KDM Biological Age Advance (yrs) - MIDUS-anchored',
-    'kdm_bioage':               'KDM Biological Age (yrs) - MIDUS-anchored',
+    'kdm_advance':              'KDM Biological Age Advance (yrs)',
+    'kdm_bioage':               'KDM Biological Age (yrs)',
+    'inflammation_advance':     'Inflammation Age advance (yrs)',
+    'kidney_advance':           'Kidney Age advance (yrs)',
+    'metabolic_advance':        'Metabolic Age advance (yrs)',
     'crp_mg_l':                 'CRP (mg/L)',
-    'il6_msd':                  'IL-6 (pg/mL, high-sens MSD)',
+    'il6_msd':                  'IL-6 (pg/mL, MSD)',
     'il8':                      'IL-8 (pg/mL)',
     'il10':                     'IL-10 (pg/mL)',
     'tnf_alpha':                'TNF-alpha (pg/mL)',
     'fibrinogen':               'Fibrinogen (mg/dL)',
     'sicam':                    'sICAM-1 (ng/mL)',
     'seselectin':               'sE-selectin (ng/mL)',
-    'supar':                    'sUPAR (ng/mL) - M2 only',
     'hba1c_pct':                'HbA1c (%)',
     'glucose_mg_dl':            'Fasting glucose (mg/dL)',
     'homair':                   'HOMA-IR',
@@ -125,51 +161,59 @@ MIDUS_VARS = {
     'whr':                      'Waist-hip ratio',
     'systolic_bp_mean':         'Mean systolic BP (mmHg)',
     'diastolic_bp_mean':        'Mean diastolic BP (mmHg)',
-    'dheas':                    'DHEA-S (ug/dL)',
-    'dhea':                     'DHEA (ng/mL)',
-    'igf1':                     'IGF-1 (ng/mL)',
-    'urinary_cortisol_12h':     'Urinary cortisol 12hr (ug/dL)',
-    'urinary_norepi':           'Urinary norepinephrine (ug/dL)',
-    'urinary_epi':              'Urinary epinephrine (ug/dL)',
-    'p1np':                     'P1NP (bone formation marker)',
-    'ntx':                      'NTx (bone resorption marker)',
-    'bap':                      'Bone alkaline phosphatase (U/L)',
-    'wordlist_total_unique':    'Word recall (unique items) - M3 BTACT',
-    'digit_span_back_score':    'Digit span backward score - M3 BTACT',
-    'category_fluency_unique':  'Category fluency (unique) - M3 BTACT',
-    'number_series_first_pass': 'Number series first pass - M3 BTACT',
+    'wordlist_total_unique':    'Word recall - M3 BTACT',
+    'digit_span_back_score':    'Digit span backward - M3 BTACT',
+    'category_fluency_unique':  'Category fluency - M3 BTACT',
     'age':                      'Age (years)',
     'sex':                      'Sex (M/F)',
-    'wave':                     'MIDUS wave (M2 / Refresher1 / M3)',
+    'wave':                     'MIDUS wave',
+    'mortality_status':         'Mortality status (0/1)',
+    'years_to_event':           'Years to event',
 }
 
 
+# ===========================================================================
+# Stats helpers
+# ===========================================================================
 def bh_fdr(pvalues):
-    """
-    Benjamini-Hochberg FDR-adjusted q-values.
-
-    Returns an array the same length as `pvalues`, in original order.
-    Standard BH step-up procedure: rank p ascending, q[i] = min over k>=i of
-    (p[k] * m / (rank[k])), then back-map to original positions and clip <= 1.
-    """
+    """Benjamini-Hochberg FDR-adjusted q-values."""
     p = np.asarray(pvalues, dtype=float)
     m = len(p)
     if m == 0:
         return np.array([], dtype=float)
-    order = np.argsort(p)
-    ranked = p[order]
-    q_sorted = ranked * m / (np.arange(1, m + 1))
-    # Step-up enforce monotone non-decreasing from the right
+    # Drop NaN p-values from BH; keep original positions
+    valid = np.isfinite(p)
+    if not valid.any():
+        return np.full_like(p, np.nan)
+    p_valid = p[valid]
+    order = np.argsort(p_valid)
+    ranked = p_valid[order]
+    q_sorted = ranked * len(p_valid) / np.arange(1, len(p_valid) + 1)
     q_sorted = np.minimum.accumulate(q_sorted[::-1])[::-1]
-    q = np.empty_like(q_sorted)
-    q[order] = np.clip(q_sorted, 0.0, 1.0)
-    return q
+    q_valid = np.empty_like(q_sorted)
+    q_valid[order] = np.clip(q_sorted, 0.0, 1.0)
+    out = np.full_like(p, np.nan)
+    out[valid] = q_valid
+    return out
 
 
+# ===========================================================================
 # Data loaders
+# ===========================================================================
 @st.cache_data
 def load_nhanes():
-    return pd.read_parquet(NHANES_PARQUET) if data_exists(NHANES_PARQUET) else pd.DataFrame()
+    if not data_exists(NHANES_PARQUET):
+        return pd.DataFrame()
+    df = pd.read_parquet(NHANES_PARQUET)
+    if data_exists(NHANES_MORTALITY_PARQUET):
+        m = pd.read_parquet(NHANES_MORTALITY_PARQUET,
+                            columns=['seqn', 'years_int_to_event', 'mortality_status'])
+        m = m.rename(columns={'years_int_to_event': 'years_to_event'})
+        if 'mortality_status' in df.columns:
+            df = df.drop(columns=['mortality_status'])
+        df = df.merge(m, on='seqn', how='left')
+    return df
+
 
 @st.cache_data
 def load_hrs_vbs():
@@ -178,44 +222,394 @@ def load_hrs_vbs():
     vbs = pd.read_parquet(HRS_VBS_PARQUET)
     survey = pd.read_parquet(HRS_PUBLIC_PARQUET) if data_exists(HRS_PUBLIC_PARQUET) else pd.DataFrame()
     if not survey.empty:
-        cog_cols = ['respondent_id','cognitive_total','word_recall_immediate',
-                    'serial7_score','adl_limitations','iadl_limitations',
-                    'mobility_limitations','walking_difficulty','condition_count',
-                    'cesd_depression','self_rated_health','bmi_self_report',
-                    'education_years']
-        cog = survey[[c for c in cog_cols if c in survey.columns]].rename(
-            columns={'respondent_id':'hhidpn'})
+        keep = [c for c in [
+            'respondent_id','cognitive_total','word_recall_immediate',
+            'serial7_score','adl_limitations','iadl_limitations',
+            'mobility_limitations','walking_difficulty','condition_count',
+            'cesd_depression','self_rated_health','bmi_self_report',
+            'education_years','current_smoker','ever_smoked',
+            'hypertension','diabetes','heart_disease','stroke',
+            'arthritis','lung_disease',
+        ] if c in survey.columns]
+        cog = survey[keep].rename(columns={'respondent_id': 'hhidpn'})
+        vbs['hhidpn'] = pd.to_numeric(vbs['hhidpn'], errors='coerce')
+        cog['hhidpn'] = pd.to_numeric(cog['hhidpn'], errors='coerce')
         vbs = vbs.merge(cog, on='hhidpn', how='left')
     return vbs
+
+
+@st.cache_data
+def load_dbs():
+    if not data_exists(HRS_DBS_PARQUET):
+        return pd.DataFrame()
+    return pd.read_parquet(HRS_DBS_PARQUET)
+
 
 @st.cache_data
 def load_midus():
     if not data_exists(MIDUS_BIO_PARQUET):
         return pd.DataFrame()
     bio = pd.read_parquet(MIDUS_BIO_PARQUET)
-    bio['sex'] = bio['sex'].map({'M': 1, 'F': 2})
+    bio['sex'] = bio['sex'].map({'M': 1, 'F': 2}) if bio['sex'].dtype == object else bio['sex']
     if 'midus_id' in bio.columns:
         bio['midus_id'] = bio['midus_id'].astype(str)
     if data_exists(MIDUS_COG_PARQUET):
         cog = pd.read_parquet(MIDUS_COG_PARQUET)
-        cog_cols = ['midus_id','wordlist_total_unique','wordlist_total_repeats',
-                    'digit_span_back_score','category_fluency_unique',
-                    'number_series_total','number_series_first_pass']
-        cog = cog[[c for c in cog_cols if c in cog.columns]].copy()
-        if 'midus_id' in cog.columns:
+        keep = [c for c in [
+            'midus_id','wordlist_total_unique','digit_span_back_score',
+            'category_fluency_unique','number_series_first_pass',
+        ] if c in cog.columns]
+        if keep:
+            cog = cog[keep].copy()
             cog['midus_id'] = cog['midus_id'].astype(str)
-        bio = bio.merge(cog, on='midus_id', how='left')
+            bio = bio.merge(cog, on='midus_id', how='left')
     return bio
+
 
 nhanes = load_nhanes()
 hrs    = load_hrs_vbs()
+dbs    = load_dbs()
 midus  = load_midus()
 
-# Initialize session log
 if "wb_log" not in st.session_state:
     st.session_state["wb_log"] = []
 
+
+# ===========================================================================
+# Per-model analysis functions
+# ===========================================================================
+def _residualize(vec, covs):
+    if len(covs) == 0:
+        return vec - vec.mean()
+    X = np.column_stack([np.ones(len(covs[0]))] + covs)
+    beta, *_ = lstsq(X, vec, rcond=None)
+    return vec - X @ beta
+
+
+def run_ols(df, exposure, outcome, covariates):
+    sub = df[[exposure, outcome] + covariates].dropna()
+    n = len(sub)
+    if n < 30:
+        return None, "n<30 after dropping NA"
+    x = sub[exposure].to_numpy(dtype=float)
+    y = sub[outcome].to_numpy(dtype=float)
+    cov_arr = [sub[c].to_numpy(dtype=float) for c in covariates]
+    rx = _residualize(x, cov_arr)
+    ry = _residualize(y, cov_arr)
+    r_adj, p_adj = stats.pearsonr(rx, ry)
+
+    X = np.column_stack([np.ones(n), x] + cov_arr)
+    beta, *_ = lstsq(X, y, rcond=None)
+    y_pred = X @ beta
+    ss_res = float(((y - y_pred) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = 1.0 - ss_res / ss_tot
+    se = np.sqrt(ss_res / (n - len(beta)) * np.diag(np.linalg.inv(X.T @ X)))
+    beta_x = float(beta[1])
+    se_x = float(se[1])
+    ci_lo, ci_hi = beta_x - 1.96 * se_x, beta_x + 1.96 * se_x
+
+    fig = px.scatter(sub.sample(min(2000, n), random_state=42),
+                     x=exposure, y=outcome, opacity=0.3,
+                     color_discrete_sequence=[NAVY])
+    xs = np.linspace(x.min(), x.max(), 100)
+    fig.add_trace(go.Scatter(
+        x=xs, y=beta[0] + beta_x * xs, mode='lines',
+        line=dict(color=CORAL, width=2.5),
+        name=f"OLS fit (β={beta_x:.3f})",
+    ))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                      font_color='#1A1A2E', height=380)
+    return {
+        "n": n,
+        "effect_label": f"β ({exposure})",
+        "effect": beta_x, "ci_lo": ci_lo, "ci_hi": ci_hi, "p": float(p_adj),
+        "fit_label": "Adjusted R² (partial r)",
+        "fit_value": float(r_adj),
+        "fit_extra": f"OLS R²={r2:.3f}",
+        "fig": fig,
+    }, None
+
+
+def run_cox(df, exposure, covariates):
+    try:
+        from lifelines import CoxPHFitter
+    except ImportError:
+        return None, "lifelines not installed"
+    needed = [exposure, 'years_to_event', 'mortality_status'] + covariates
+    sub = df[needed].dropna()
+    sub = sub[sub['years_to_event'] > 0]
+    n = len(sub)
+    if n < 100 or sub['mortality_status'].sum() < 30:
+        return None, f"n={n}, events={int(sub['mortality_status'].sum())} - too few"
+    cph = CoxPHFitter()
+    try:
+        cph.fit(sub, duration_col='years_to_event', event_col='mortality_status')
+    except Exception as e:
+        return None, f"Cox fit failed: {e}"
+    s = cph.summary.loc[exposure]
+    cidx = float(cph.concordance_index_)
+
+    # KM by quintile of exposure
+    from lifelines import KaplanMeierFitter
+    sub2 = sub.copy()
+    sub2['q'] = pd.qcut(sub2[exposure], 5, labels=['Q1','Q2','Q3','Q4','Q5'])
+    palette = [TEAL, "#7FB069", GOLD, "#E8A85B", CORAL]
+    fig = go.Figure()
+    for q, color in zip(['Q1','Q2','Q3','Q4','Q5'], palette):
+        s_q = sub2[sub2['q'] == q]
+        if len(s_q) < 30:
+            continue
+        kmf = KaplanMeierFitter()
+        kmf.fit(s_q['years_to_event'], s_q['mortality_status'], label=str(q))
+        sf = kmf.survival_function_
+        fig.add_trace(go.Scatter(x=sf.index, y=sf.iloc[:, 0], mode='lines',
+                                  name=str(q), line=dict(color=color, width=2.5)))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                      font_color='#1A1A2E', height=380,
+                      xaxis_title='Years', yaxis_title='Survival',
+                      yaxis=dict(range=[0.4, 1.01]),
+                      title=f'KM survival by quintile of {exposure}')
+    return {
+        "n": n,
+        "effect_label": f"HR per 1-unit {exposure}",
+        "effect": float(s["exp(coef)"]),
+        "ci_lo": float(s["exp(coef) lower 95%"]),
+        "ci_hi": float(s["exp(coef) upper 95%"]),
+        "p": float(s["p"]),
+        "fit_label": "C-index",
+        "fit_value": cidx,
+        "fit_extra": f"events={int(sub['mortality_status'].sum()):,}",
+        "fig": fig,
+    }, None
+
+
+def run_logistic(df, exposure, outcome, covariates):
+    try:
+        import statsmodels.api as sm
+    except ImportError:
+        return None, "statsmodels not installed"
+    needed = [exposure, outcome] + covariates
+    sub = df[needed].dropna().copy()
+    sub[outcome] = pd.to_numeric(sub[outcome], errors='coerce')
+    sub = sub.dropna()
+    sub[outcome] = (sub[outcome] > 0.5).astype(int)
+    n = len(sub)
+    if n < 100 or sub[outcome].sum() < 20 or sub[outcome].sum() > n - 20:
+        return None, f"n={n}, positives={int(sub[outcome].sum())} - too few or too imbalanced"
+    X = sub[[exposure] + covariates].to_numpy(dtype=float)
+    X = sm.add_constant(X)
+    y = sub[outcome].to_numpy(dtype=int)
+    try:
+        res = sm.Logit(y, X).fit(disp=False)
+    except Exception as e:
+        return None, f"Logit failed: {e}"
+    coef = float(res.params[1])
+    se = float(res.bse[1])
+    p = float(res.pvalues[1])
+    or_val = float(np.exp(coef))
+    or_lo, or_hi = float(np.exp(coef - 1.96 * se)), float(np.exp(coef + 1.96 * se))
+
+    # AUC
+    p_pred = res.predict(X)
+    try:
+        auc = float(_auc(y, p_pred))
+    except Exception:
+        auc = float('nan')
+
+    # Predicted-probability vs exposure plot (averaging covariates)
+    xs = np.linspace(sub[exposure].quantile(0.02), sub[exposure].quantile(0.98), 80)
+    cov_means = [sub[c].mean() for c in covariates]
+    Xs = np.column_stack([np.ones_like(xs), xs] + [np.full_like(xs, m) for m in cov_means])
+    p_curve = res.predict(Xs)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=xs, y=p_curve, mode='lines',
+                              line=dict(color=CORAL, width=3),
+                              name='Predicted P(Y=1)'))
+    # rug of observed positives/negatives
+    pos = sub[sub[outcome] == 1].sample(min(500, sub[outcome].sum()), random_state=42)
+    neg = sub[sub[outcome] == 0].sample(min(500, n - int(sub[outcome].sum())), random_state=42)
+    fig.add_trace(go.Scatter(x=pos[exposure], y=[1.02] * len(pos), mode='markers',
+                              marker=dict(color=NAVY, size=4, symbol='line-ns-open'),
+                              showlegend=False))
+    fig.add_trace(go.Scatter(x=neg[exposure], y=[-0.02] * len(neg), mode='markers',
+                              marker=dict(color=GOLD, size=4, symbol='line-ns-open'),
+                              showlegend=False))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                      font_color='#1A1A2E', height=380,
+                      xaxis_title=exposure, yaxis_title=f'P({outcome}=1)',
+                      yaxis=dict(range=[-0.05, 1.05]),
+                      title=f'Predicted probability of {outcome} vs {exposure}')
+    return {
+        "n": n,
+        "effect_label": f"OR per 1-unit {exposure}",
+        "effect": or_val, "ci_lo": or_lo, "ci_hi": or_hi, "p": p,
+        "fit_label": "AUC",
+        "fit_value": auc,
+        "fit_extra": f"positives={int(sub[outcome].sum()):,}",
+        "fig": fig,
+    }, None
+
+
+def _auc(y_true, y_score):
+    """Simple AUC via Mann-Whitney - no sklearn dependency."""
+    y_true = np.asarray(y_true, dtype=int)
+    y_score = np.asarray(y_score, dtype=float)
+    pos = y_score[y_true == 1]
+    neg = y_score[y_true == 0]
+    if len(pos) == 0 or len(neg) == 0:
+        return float('nan')
+    u, _ = stats.mannwhitneyu(pos, neg, alternative='greater')
+    return u / (len(pos) * len(neg))
+
+
+def run_mixed(df, exposure, outcome, grouping, covariates):
+    try:
+        from statsmodels.regression.mixed_linear_model import MixedLM
+    except ImportError:
+        return None, "statsmodels not installed"
+    needed = [exposure, outcome, grouping] + covariates
+    sub = df[needed].dropna()
+    n = len(sub)
+    n_groups = sub[grouping].nunique()
+    if n < 200 or n_groups < 30:
+        return None, f"n={n}, groups={n_groups} - too few"
+    formula_rhs = " + ".join([exposure] + covariates) if covariates else exposure
+    try:
+        md = MixedLM.from_formula(f"{outcome} ~ {formula_rhs}",
+                                    groups=sub[grouping].astype(str), data=sub)
+        res = md.fit(method='lbfgs', reml=True)
+    except Exception as e:
+        return None, f"MixedLM failed: {e}"
+    if exposure not in res.params.index:
+        return None, "exposure not in fit"
+    beta = float(res.params[exposure])
+    se = float(res.bse[exposure])
+    p = float(res.pvalues[exposure])
+    ci_lo, ci_hi = beta - 1.96 * se, beta + 1.96 * se
+    sigma2_g = float(res.cov_re.iloc[0, 0]) if hasattr(res.cov_re, "iloc") else float(np.array(res.cov_re).flatten()[0])
+    sigma2_e = float(res.scale)
+    icc = sigma2_g / (sigma2_g + sigma2_e) if (sigma2_g + sigma2_e) > 0 else float('nan')
+
+    # Spaghetti plot: trajectories of a sample of groups + population fitted line
+    sample_groups = sub[grouping].drop_duplicates().sample(min(60, n_groups), random_state=42)
+    spag = sub[sub[grouping].isin(sample_groups)].sort_values([grouping, exposure])
+    fig = go.Figure()
+    for _, traj in spag.groupby(grouping):
+        if len(traj) < 2:
+            continue
+        fig.add_trace(go.Scatter(
+            x=traj[exposure], y=traj[outcome],
+            mode='lines+markers',
+            line=dict(color=NAVY, width=1),
+            marker=dict(color=NAVY, size=4),
+            opacity=0.25,
+            showlegend=False,
+        ))
+    xs = np.linspace(sub[exposure].min(), sub[exposure].max(), 60)
+    yhat = float(res.params['Intercept']) + beta * xs
+    fig.add_trace(go.Scatter(x=xs, y=yhat, mode='lines',
+                              line=dict(color=CORAL, width=4),
+                              name=f'Population fixed-effect (β={beta:.3f})'))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                      font_color='#1A1A2E', height=420,
+                      xaxis_title=exposure, yaxis_title=outcome,
+                      title=f'Mixed-effects: {outcome} ~ {exposure} | random({grouping})')
+    return {
+        "n": n,
+        "effect_label": f"β fixed ({exposure})",
+        "effect": beta, "ci_lo": ci_lo, "ci_hi": ci_hi, "p": p,
+        "fit_label": "ICC (group var / total var)",
+        "fit_value": icc,
+        "fit_extra": f"groups={n_groups:,}, σ²_g={sigma2_g:.3f}, σ²_e={sigma2_e:.3f}",
+        "fig": fig,
+    }, None
+
+
+def run_gam(df, exposure, outcome, covariates):
+    try:
+        from statsmodels.gam.api import BSplines, GLMGam
+        import statsmodels.api as sm
+    except ImportError:
+        return None, "statsmodels not installed"
+    needed = [exposure, outcome] + covariates
+    sub = df[needed].dropna()
+    n = len(sub)
+    if n < 200:
+        return None, f"n={n} - too few"
+    x = sub[exposure].to_numpy(dtype=float).reshape(-1, 1)
+    bs = BSplines(x, df=[8], degree=[3])
+    Xc = sub[covariates].to_numpy(dtype=float) if covariates else np.zeros((n, 0))
+    Xc = sm.add_constant(np.column_stack([Xc])) if covariates else np.ones((n, 1))
+    y = sub[outcome].to_numpy(dtype=float)
+    try:
+        gam = GLMGam(y, exog=Xc, smoother=bs).fit()
+    except Exception as e:
+        return None, f"GAM fit failed: {e}"
+
+    # F-test on smooth term
+    try:
+        f_test = gam.test_significance(smooth_index=0)
+        p_smooth = float(f_test.pvalue)
+        edf = float(gam.edf[len(Xc[0]):].sum()) if hasattr(gam, "edf") else float('nan')
+    except Exception:
+        # Fallback: compare with no-smooth GLM
+        try:
+            base = sm.GLM(y, Xc).fit()
+            ll_full = float(gam.llf)
+            ll_base = float(base.llf)
+            df_diff = max(1, len(gam.params) - len(base.params))
+            from scipy.stats import chi2
+            lr = 2 * (ll_full - ll_base)
+            p_smooth = float(1 - chi2.cdf(lr, df_diff))
+            edf = float(df_diff)
+        except Exception as e2:
+            return None, f"GAM significance test failed: {e2}"
+
+    # Partial-effect plot (smooth on exposure, with 95% CI band)
+    grid = np.linspace(sub[exposure].quantile(0.01), sub[exposure].quantile(0.99), 80).reshape(-1, 1)
+    bs_grid = bs.transform(grid)
+    Xc_grid = np.tile(Xc.mean(axis=0), (len(grid), 1)) if Xc.shape[1] > 0 else np.zeros((len(grid), 0))
+    X_grid = np.column_stack([Xc_grid, bs_grid])
+    y_pred = X_grid @ gam.params
+    pred_se = np.sqrt(np.diag(X_grid @ gam.cov_params() @ X_grid.T))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=grid.flatten(), y=y_pred + 1.96 * pred_se,
+        mode='lines', line=dict(width=0), showlegend=False))
+    fig.add_trace(go.Scatter(
+        x=grid.flatten(), y=y_pred - 1.96 * pred_se,
+        mode='lines', fill='tonexty', line=dict(width=0),
+        fillcolor='rgba(13,27,62,0.18)', showlegend=False))
+    fig.add_trace(go.Scatter(
+        x=grid.flatten(), y=y_pred,
+        mode='lines', line=dict(color=NAVY, width=3),
+        name='GAM smooth (95% CI band)'))
+    rug = sub.sample(min(1500, n), random_state=42)
+    fig.add_trace(go.Scatter(
+        x=rug[exposure], y=rug[outcome],
+        mode='markers',
+        marker=dict(color=GOLD, size=4, opacity=0.35),
+        showlegend=False, name='observed'))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                      font_color='#1A1A2E', height=420,
+                      xaxis_title=exposure, yaxis_title=outcome,
+                      title=f'GAM smooth: {outcome} ~ s({exposure})')
+    return {
+        "n": n,
+        "effect_label": f"smooth({exposure}) edf",
+        "effect": edf, "ci_lo": float('nan'), "ci_hi": float('nan'), "p": p_smooth,
+        "fit_label": "edf (smooth)",
+        "fit_value": edf,
+        "fit_extra": "F-test on smooth term",
+        "fig": fig,
+    }, None
+
+
+# ===========================================================================
 # UI
+# ===========================================================================
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
@@ -223,11 +617,16 @@ with col_left:
 
     dataset = st.selectbox(
         "Dataset",
-        ["NHANES 2001-2018", "HRS 2016 (VBS + Survey)", "MIDUS (M2 + R1 + M3, 2004-2022)"],
+        ["NHANES 2001-2018", "HRS 2016 (VBS + Survey)",
+         "HRS DBS Longitudinal (2006-2016)",
+         "MIDUS (M2 + R1 + M3, 2004-2022)"],
     )
     if dataset.startswith("NHANES"):
         df = nhanes
         var_dict = {**NHANES_VARS}
+    elif dataset.startswith("HRS DBS"):
+        df = dbs
+        var_dict = {**DBS_VARS}
     elif dataset.startswith("HRS"):
         df = hrs
         var_dict = {**HRS_VARS, **HRS_SURVEY_VARS}
@@ -244,48 +643,96 @@ with col_left:
         st.error("No variables from this dataset's dictionary are present in the parquet.")
         st.stop()
 
-    exposure_default = next(
-        (v for v in ['phenoage_delta', 'kdm_advance', 'crp_mg_l'] if v in available),
-        available[0],
+    model = st.selectbox(
+        "Model",
+        ["OLS / Linear", "Cox PH (survival)", "Logistic (binary outcome)",
+         "Mixed-effects (longitudinal)", "GAM (smooth term on X)"],
     )
+
+    # Exposure
+    exp_default = next((v for v in
+                        ['phenoage_delta', 'kdm_advance', 'inflammation_advance',
+                         'liver_advance', 'wave_year', 'crp_mg_l'] if v in available),
+                       available[0])
     exposure_key = st.selectbox(
         "Exposure (X)", available,
-        index=available.index(exposure_default),
+        index=available.index(exp_default),
         format_func=lambda k: var_dict[k],
     )
 
-    outcome_options = [k for k in available if k != exposure_key]
-    default_outcome_candidates = [
-        'cognitive_total', 'wordlist_total_unique', 'hba1c', 'hba1c_pct'
-    ]
-    default_outcome = next(
-        (v for v in default_outcome_candidates if v in outcome_options),
-        outcome_options[0],
-    )
-    outcome_key = st.selectbox(
-        "Outcome (Y)", outcome_options,
-        index=outcome_options.index(default_outcome),
-        format_func=lambda k: var_dict[k],
-    )
+    # Outcome - context-aware
+    outcome_key = None
+    grouping_key = None
 
-    covariate_options = [k for k in available if k not in [exposure_key, outcome_key]]
+    if model.startswith("Cox"):
+        ok = ('mortality_status' in df.columns) and ('years_to_event' in df.columns)
+        if not ok:
+            st.error("Cox PH requires `mortality_status` and `years_to_event` in the dataset. "
+                     "Try NHANES, HRS VBS, or MIDUS biomarker.")
+            st.stop()
+        st.caption("Outcome: (mortality_status, years_to_event) - auto-fixed.")
+    elif model.startswith("Logistic"):
+        binary_candidates = []
+        for c in df.columns:
+            v = pd.to_numeric(df[c], errors='coerce')
+            if v.notna().any() and set(v.dropna().unique()).issubset({0.0, 1.0}):
+                if df[c].notna().sum() > 200 and v.dropna().nunique() == 2:
+                    binary_candidates.append(c)
+        binary_in_dict = [c for c in binary_candidates if c in var_dict and c != exposure_key]
+        if not binary_in_dict:
+            st.error("No binary outcomes available in this dataset.")
+            st.stop()
+        outcome_key = st.selectbox(
+            "Outcome (Y, binary 0/1)", binary_in_dict,
+            format_func=lambda k: var_dict.get(k, k),
+        )
+    elif model.startswith("Mixed"):
+        grouping_options = [c for c in ['hhidpn', 'midus_id', 'seqn'] if c in df.columns]
+        if not grouping_options:
+            st.error("Mixed-effects requires a grouping ID (hhidpn / midus_id). "
+                     "Try HRS DBS Longitudinal.")
+            st.stop()
+        grouping_key = st.selectbox("Grouping ID", grouping_options)
+        outcome_options = [k for k in available if k not in [exposure_key, grouping_key]]
+        outcome_default = next((v for v in ['hba1c', 'crp', 'hdl'] if v in outcome_options),
+                                outcome_options[0])
+        outcome_key = st.selectbox(
+            "Outcome (Y)", outcome_options,
+            index=outcome_options.index(outcome_default),
+            format_func=lambda k: var_dict.get(k, k),
+        )
+    else:  # OLS / GAM
+        outcome_options = [k for k in available if k != exposure_key]
+        outcome_default = next((v for v in
+                                 ['cognitive_total', 'wordlist_total_unique',
+                                  'hba1c', 'hba1c_pct', 'crp', 'crp_mg_l'] if v in outcome_options),
+                                outcome_options[0])
+        outcome_key = st.selectbox(
+            "Outcome (Y)", outcome_options,
+            index=outcome_options.index(outcome_default),
+            format_func=lambda k: var_dict.get(k, k),
+        )
+
+    cov_options = [k for k in available
+                   if k not in [exposure_key, outcome_key, grouping_key,
+                                'mortality_status', 'years_to_event']]
     default_covs = [k for k in
-                    ['age','r13agey_b','sex','ragender','education','education_years','wave']
-                    if k in covariate_options][:3]
-    covariate_keys = st.multiselect(
-        "Covariates (control for)",
-        covariate_options,
+                    ['age', 'r13agey_b', 'sex', 'ragender', 'education',
+                     'education_years']
+                    if k in cov_options][:3]
+    cov_keys = st.multiselect(
+        "Covariates (linear adjustments)", cov_options,
         default=default_covs,
         format_func=lambda k: var_dict.get(k, k),
     )
 
-    age_col_present = next((c for c in ['age','r13agey_b'] if c in df.columns), None)
+    age_col_present = next((c for c in ['age', 'r13agey_b'] if c in df.columns), None)
     if age_col_present:
         age_min = int(df[age_col_present].min())
         age_max = int(df[age_col_present].max())
         age_filter = st.slider("Age range filter", age_min, age_max, (age_min, age_max), key="wb_age")
     else:
-        age_filter = (20, 90)
+        age_filter = None
 
     st.markdown("---")
     fdr_alpha = st.slider("FDR threshold (q)", 0.01, 0.20, 0.05, step=0.01, key="wb_fdr_q")
@@ -293,178 +740,137 @@ with col_left:
 
     run = st.button("Run Analysis", type="primary", use_container_width=True)
 
-# Analysis
+
+# ===========================================================================
+# Run
+# ===========================================================================
 with col_right:
     if not run:
         st.info("Configure your hypothesis on the left and click **Run Analysis**.")
         st.markdown(
-            "**How to use:**\n\n"
-            "Select an exposure variable (what you think is causing something), "
-            "an outcome variable (what you're measuring), and covariates to control for. "
-            "The workbench computes the unadjusted and adjusted associations and shows "
-            "the scatter plot.\n\n"
-            "**Example hypotheses:**\n"
-            "- NHANES: Does PhenoAge delta predict HbA1c, controlling for age and sex?\n"
-            "- HRS: Does PhenoAge delta predict cognitive score, controlling for age, sex, education?\n"
-            "- MIDUS: Does IL-6 predict KDM advance, controlling for age and sex?\n"
-            "- MIDUS: Does inflammation (CRP, IL-6) predict word recall in M3, controlling for age, sex, HbA1c?\n"
+            "**Five model types:**\n\n"
+            "- **OLS** - linear regression with partial correlation, "
+            "for continuous outcomes\n"
+            "- **Cox PH** - hazard ratio for time-to-event mortality\n"
+            "- **Logistic** - odds ratio for binary outcomes "
+            "(cognitive impairment, walking difficulty, conditions...)\n"
+            "- **Mixed-effects** - random-intercept linear model for "
+            "longitudinal data (HRS DBS waves)\n"
+            "- **GAM** - smooth nonlinear term on the exposure with "
+            "optional linear covariates\n\n"
+            "All five append to a uniform session log. BH-FDR is applied "
+            "across all logged tests in this session."
         )
     else:
-        age_col = 'age' if 'age' in df.columns else 'r13agey_b'
-        cols_needed = list({exposure_key, outcome_key, age_col} | set(covariate_keys))
-        analytic = df[[c for c in cols_needed if c in df.columns]].copy()
+        # Apply age filter if numeric age column exists
+        analytic = df.copy()
+        if age_col_present and age_filter:
+            analytic = analytic[analytic[age_col_present].between(*age_filter)]
 
-        if 'wave' in analytic.columns:
-            analytic['wave'] = analytic['wave'].map(
-                {'MIDUS2': 1, 'MIDUS_Refresher1': 2, 'MIDUS3': 3}
-            )
-
-        analytic = analytic.dropna()
-
-        if age_col in analytic.columns:
-            analytic = analytic[analytic[age_col].between(*age_filter)]
-
-        for c in cols_needed:
-            if c in analytic.columns:
+        # Build coerce-to-numeric on relevant columns
+        cols_used = [exposure_key] + cov_keys
+        if outcome_key:
+            cols_used.append(outcome_key)
+        if grouping_key:
+            cols_used.append(grouping_key)
+        if model.startswith("Cox"):
+            cols_used += ['mortality_status', 'years_to_event']
+        for c in set(cols_used):
+            if c in analytic.columns and c != grouping_key:
                 analytic[c] = pd.to_numeric(analytic[c], errors='coerce')
-        analytic = analytic.dropna()
-        n = len(analytic)
 
-        if n < 30:
-            st.error(f"Too few observations after filtering: n={n}. Relax filters or choose different variables.")
+        if model.startswith("OLS"):
+            res, err = run_ols(analytic, exposure_key, outcome_key, cov_keys)
+        elif model.startswith("Cox"):
+            res, err = run_cox(analytic, exposure_key, cov_keys)
+        elif model.startswith("Logistic"):
+            res, err = run_logistic(analytic, exposure_key, outcome_key, cov_keys)
+        elif model.startswith("Mixed"):
+            res, err = run_mixed(analytic, exposure_key, outcome_key, grouping_key, cov_keys)
+        else:  # GAM
+            res, err = run_gam(analytic, exposure_key, outcome_key, cov_keys)
+
+        if res is None:
+            st.error(f"{model} failed: {err}")
         else:
-            x = analytic[exposure_key].values
-            y = analytic[outcome_key].values
+            n = res["n"]
+            st.markdown(f"**n = {n:,}** | {model} | {dataset}")
+            m1, m2, m3 = st.columns([2, 2, 2])
+            m1.metric(res["effect_label"],
+                      f"{res['effect']:+.4f}" if abs(res['effect']) < 100 else f"{res['effect']:.2f}")
+            if np.isfinite(res["ci_lo"]) and np.isfinite(res["ci_hi"]):
+                m2.metric("95% CI", f"[{res['ci_lo']:+.4f}, {res['ci_hi']:+.4f}]")
+            else:
+                m2.metric("95% CI", "—")
+            m3.metric("p-value", f"{res['p']:.2e}")
 
-            r_raw, p_raw = stats.pearsonr(x, y)
+            f1, f2 = st.columns([3, 4])
+            f1.metric(res["fit_label"], f"{res['fit_value']:.3f}"
+                       if isinstance(res['fit_value'], float) and np.isfinite(res['fit_value'])
+                       else "—")
+            f2.markdown(f"<div style='color:#6B7280;font-size:13px;margin-top:14px;'>"
+                        f"{res['fit_extra']}</div>", unsafe_allow_html=True)
 
-            def residualize(vec, covs):
-                if len(covs) == 0:
-                    return vec - vec.mean()
-                X_cov = np.column_stack([np.ones(len(covs[0]))] + covs)
-                beta, _, _, _ = lstsq(X_cov, vec, rcond=None)
-                return vec - X_cov @ beta
+            st.plotly_chart(res["fig"], width='stretch', key='wb_main_plot')
 
-            cov_arrays = [analytic[c].values for c in covariate_keys if c in analytic.columns]
-            rx = residualize(x, cov_arrays)
-            ry = residualize(y, cov_arrays)
-            r_adj, p_adj = stats.pearsonr(rx, ry)
-
-            X_reg = np.column_stack([np.ones(n), x] + cov_arrays)
-            beta_reg, _, _, _ = lstsq(X_reg, y, rcond=None)
-            y_pred = X_reg @ beta_reg
-            ss_res = np.sum((y - y_pred)**2)
-            ss_tot = np.sum((y - y.mean())**2)
-            r2 = 1 - ss_res / ss_tot
-
-            # Append to session log
             if log_test:
                 st.session_state["wb_log"].append({
                     "ts": time.strftime("%H:%M:%S"),
                     "dataset": dataset,
+                    "model": model.split(" ")[0],
                     "exposure": var_dict.get(exposure_key, exposure_key),
-                    "outcome": var_dict.get(outcome_key, outcome_key),
-                    "covariates": ", ".join([var_dict.get(c, c) for c in covariate_keys]) or "(none)",
+                    "outcome": var_dict.get(outcome_key, outcome_key) if outcome_key
+                               else "(time + event)",
+                    "covariates": ", ".join([var_dict.get(c, c) for c in cov_keys]) or "(none)",
                     "n": int(n),
-                    "r_raw": float(r_raw),
-                    "p_raw": float(p_raw),
-                    "r_adj": float(r_adj),
-                    "p_adj": float(p_adj),
-                    "r2": float(r2),
+                    "effect_label": res["effect_label"],
+                    "effect": float(res["effect"]),
+                    "ci_lo": float(res["ci_lo"]),
+                    "ci_hi": float(res["ci_hi"]),
+                    "p": float(res["p"]),
+                    "fit_label": res["fit_label"],
+                    "fit_value": float(res["fit_value"])
+                                  if isinstance(res["fit_value"], float)
+                                     and np.isfinite(res["fit_value"]) else float('nan'),
                 })
 
-            st.markdown(f"**n = {n:,}** analytic observations | {dataset}")
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Unadjusted r", f"{r_raw:.3f}")
-            m2.metric("p-value (unadj.)", f"{p_raw:.2e}")
-            m3.metric("Partial r (adjusted)", f"{r_adj:.3f}")
-            m4.metric("p-value (adj.)", f"{p_adj:.2e}")
-
-            reg_names = ['Intercept', var_dict.get(exposure_key, exposure_key)] + \
-                        [var_dict.get(c, c) for c in covariate_keys if c in analytic.columns]
-            reg_df = pd.DataFrame({
-                'Variable': reg_names,
-                'Coefficient': [f"{b:.4f}" for b in beta_reg],
-            })
-            reg_df.loc[len(reg_df)] = ['R^2', f"{r2:.4f}"]
-            st.markdown("**OLS Regression Coefficients**")
-            st.dataframe(reg_df, width='stretch', key='wb_reg_table')
-
-            plot_df = pd.DataFrame({
-                var_dict.get(exposure_key, exposure_key): x,
-                var_dict.get(outcome_key, outcome_key): y,
-            })
-            fig = px.scatter(
-                plot_df,
-                x=var_dict.get(exposure_key, exposure_key),
-                y=var_dict.get(outcome_key, outcome_key),
-                opacity=0.3,
-                color_discrete_sequence=[NAVY],
-                title=f"{var_dict.get(exposure_key, exposure_key)} vs {var_dict.get(outcome_key, outcome_key)}",
-            )
-            x_line = np.linspace(x.min(), x.max(), 100)
-            y_line = beta_reg[0] + beta_reg[1] * x_line
-            fig.add_trace(go.Scatter(
-                x=x_line, y=y_line, mode='lines',
-                line=dict(color=CORAL, width=2),
-                name=f'OLS fit (r={r_raw:.3f})',
-            ))
-            fig.update_layout(
-                plot_bgcolor='white', paper_bgcolor='white',
-                font_color='#1A1A2E', height=420,
-            )
-            st.plotly_chart(fig, width='stretch', key='wb_scatter')
-
-            st.caption(
-                f"Unadjusted Pearson r = {r_raw:.3f} (p = {p_raw:.2e}). "
-                f"Partial r controlling for [{', '.join([var_dict.get(c,c) for c in covariate_keys])}] "
-                f"= {r_adj:.3f} (p = {p_adj:.2e}). "
-                f"OLS R^2 = {r2:.3f}. n = {n:,}."
-            )
-
-
-# =============================================================================
+# ===========================================================================
 # Session Log + BH-FDR
-# =============================================================================
+# ===========================================================================
 st.markdown("---")
 st.markdown("### Session log")
 log = st.session_state.get("wb_log", [])
 if not log:
-    st.caption(
-        "No tests yet. Each Run with 'Add to session log' enabled will be recorded "
-        "here so you can apply Benjamini-Hochberg FDR correction across all your "
-        "tests this session."
-    )
+    st.caption("No tests yet. Each Run with 'Add to session log' enabled is recorded here "
+               "so you can apply Benjamini-Hochberg FDR correction across all your tests.")
 else:
     log_df = pd.DataFrame(log)
-    # BH on adjusted p-values (the science-relevant ones — partial correlations)
-    log_df["q_adj"] = bh_fdr(log_df["p_adj"].values)
-    log_df["q_raw"] = bh_fdr(log_df["p_raw"].values)
-    log_df["pass_FDR"] = log_df["q_adj"] <= fdr_alpha
+    log_df["q"] = bh_fdr(log_df["p"].values)
+    log_df["pass_FDR"] = log_df["q"] <= fdr_alpha
 
-    # Display formatting
     disp = log_df.copy()
-    disp["r_raw"]  = disp["r_raw"].map(lambda v: f"{v:+.3f}")
-    disp["r_adj"]  = disp["r_adj"].map(lambda v: f"{v:+.3f}")
-    disp["p_raw"]  = disp["p_raw"].map(lambda v: f"{v:.2e}")
-    disp["p_adj"]  = disp["p_adj"].map(lambda v: f"{v:.2e}")
-    disp["q_adj"]  = disp["q_adj"].map(lambda v: f"{v:.3e}")
-    disp["q_raw"]  = disp["q_raw"].map(lambda v: f"{v:.3e}")
-    disp["r2"]     = disp["r2"].map(lambda v: f"{v:.3f}")
+    disp["effect"] = disp["effect"].map(lambda v: f"{v:+.4f}" if abs(v) < 100 else f"{v:.2f}")
+    disp["ci"]     = disp.apply(lambda r:
+        f"[{r['ci_lo']:+.3f}, {r['ci_hi']:+.3f}]"
+        if np.isfinite(r['ci_lo']) and np.isfinite(r['ci_hi']) else "—", axis=1)
+    disp["p"]      = disp["p"].map(lambda v: f"{v:.2e}")
+    disp["q"]      = disp["q"].map(lambda v: f"{v:.3e}" if np.isfinite(v) else "—")
+    disp["fit_value"] = disp["fit_value"].map(lambda v: f"{v:.3f}" if np.isfinite(v) else "—")
     disp["pass_FDR"] = disp["pass_FDR"].map(lambda b: "yes" if b else "no")
-    disp = disp[["ts","dataset","exposure","outcome","covariates","n",
-                 "r_raw","p_raw","r_adj","p_adj","q_adj","pass_FDR","r2"]]
+    disp = disp[["ts", "dataset", "model", "exposure", "outcome", "covariates",
+                 "n", "effect_label", "effect", "ci", "p", "q", "pass_FDR",
+                 "fit_label", "fit_value"]]
 
     n_tests = len(log_df)
     n_pass  = int(log_df["pass_FDR"].sum())
     cA, cB, cC = st.columns([2, 2, 3])
     cA.metric("Tests this session", f"{n_tests}")
-    cB.metric(f"Pass BH-FDR (q <= {fdr_alpha:.2f})", f"{n_pass}")
+    cB.metric(f"Pass BH-FDR (q ≤ {fdr_alpha:.2f})", f"{n_pass}")
     cC.markdown(
         f"<div style='background:{NAVY};color:white;padding:10px 14px;border-radius:6px;"
-        f"font-size:13px;'>Adjusted-p column = partial correlation p-value. "
-        f"q_adj = BH FDR across all logged tests in this session.</div>",
+        f"font-size:13px;'>q = BH FDR over the p column across all logged tests "
+        f"this session, regardless of model type.</div>",
         unsafe_allow_html=True,
     )
 
@@ -486,8 +892,6 @@ else:
         )
 
     st.caption(
-        "BH-FDR (Benjamini & Hochberg, 1995) controls the expected proportion of "
-        "false discoveries among rejected nulls at level q. Tests are uniformly "
-        "ranked; q_adj depends on the full set of tests run this session, so "
-        "q-values can change as you add more hypotheses."
+        "BH-FDR is applied over the p column. Effect, CI, and fit-stat are "
+        "model-specific; q-values can change as you add more hypotheses."
     )
