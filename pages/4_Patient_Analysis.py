@@ -1,14 +1,18 @@
 """
 Patient Analysis - upload a single lab report (or enter values once) and
-explore the same patient across three coordinated views.
+explore the same patient across multiple coordinated views.
 
 Tabs:
   1. Biological Age - PhenoAge + delta + 10-yr mortality risk (Levine 2018)
-  2. Normative Reference - percentile vs. NHANES age-sex reference cohort
-  3. Intervention Simulator - biomarker contribution waterfall + what-if sliders
+  2. Normative Reference - percentile vs. matched-cohort reference (NHANES)
+  3. PhenoAge Intervention - biomarker contribution waterfall + what-if sliders
+  4. Metabolic Age - 7-marker organ clock + intervention simulator
+  5. Liver Age - 6-marker liver clock + intervention simulator
+  6. Kidney Age - 4-marker kidney clock (CKD-EPI 2021 eGFR) + simulator
+  7. Reports - INEXION-branded Patient + Physician .docx reports
 
-All three tabs read from a single shared input section at the top of the page,
-so values entered (or extracted from PDF) flow into every analysis.
+All tabs read from a single shared input section at the top of the page, so
+values entered (or extracted from PDF) flow into every analysis.
 No patient data persists beyond the session.
 """
 from __future__ import annotations
@@ -16,6 +20,7 @@ import io
 import json
 import math
 import os
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -25,7 +30,7 @@ import streamlit as st
 from scipy import stats
 
 from src.bioage import compute_phenoage, bootstrap_phenoage
-from src.config import NAVY, GOLD, CORAL, TEAL, NHANES_PARQUET, data_exists
+from src.config import NAVY, GOLD, CORAL, TEAL, LIGHT_BG, NHANES_PARQUET, data_exists
 
 st.set_page_config(page_title="Patient Analysis - INEXION Registry", layout="wide")
 
@@ -732,7 +737,7 @@ def bootstrap_kidney(values, n_boot=400, seed=42):
 
 tabs = st.tabs(["Biological Age (PhenoAge)", "Normative Reference",
                 "PhenoAge Intervention", "Metabolic Age",
-                "Liver Age", "Kidney Age"])
+                "Liver Age", "Kidney Age", "Reports"])
 
 # TAB 1 - BIOLOGICAL AGE
 with tabs[0]:
@@ -1641,3 +1646,240 @@ with tabs[5]:
             "in isolation. The contribution waterfall reflects multivariate fit, not "
             "individual marker effects. Cox HR=1.018/yr advance, C=0.842."
         )
+
+
+# ---------------------------------------------------------------------------
+# TAB 7 - REPORTS
+# Comprehensive INEXION-branded .docx outputs for patient + clinician audiences.
+# Pulls everything from session state + the computed clocks above and hands it
+# off to src.reports for narrative generation (Claude Haiku) and docx assembly.
+# ---------------------------------------------------------------------------
+with tabs[6]:
+    st.markdown(
+        f"<div style='background:{NAVY};color:white;padding:22px 28px;"
+        f"border-radius:8px;margin-bottom:18px;'>"
+        f"<div style='color:{GOLD};font-size:11px;letter-spacing:2px;"
+        f"text-transform:uppercase;font-weight:600;'>INEXION Longevity Registry</div>"
+        f"<div style='font-size:22px;font-weight:700;margin-top:4px;'>"
+        f"Generate Patient & Physician Reports</div>"
+        f"<div style='color:#C9CBD4;font-size:13px;margin-top:6px;'>"
+        f"Two INEXION-branded Word documents that wrap up everything from "
+        f"the analyses above into a shareable, written deliverable.</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Compile the data payload that both report builders consume. All values
+    # come from session state (already validated by the input section above)
+    # plus the clocks computed earlier in this page.
+    _LOGO_PATH_RPT = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "assets", "inexion_logo.png"
+    )
+
+    rpt_patient = {
+        "age":       int(st.session_state["pa_age"]),
+        "sex":       st.session_state["pa_sex"],
+        "race":      st.session_state.get("pa_race", ""),
+        "height_in": float(st.session_state["pa_height_in"]),
+        "weight_lb": float(st.session_state["pa_weight_lb"]),
+        "bmi":       float(st.session_state["pa_bmi"]),
+        "waist_in":  float(st.session_state["pa_waist_in"]),
+    }
+    rpt_labs = {
+        "albumin": albumin, "creatinine": creatinine, "glucose": glucose,
+        "bun": bun_pa, "uric_acid": ua_pa,
+        "crp": crp, "lymph": lymph, "wbc": wbc, "mcv": mcv, "rdw": rdw,
+        "hba1c": hba1c_pa, "total_chol": total_chol_pa, "hdl": hdl_pa,
+        "tbili": tbili_pa, "total_protein": tprot_pa,
+        "alkphos": alkphos, "platelet": plt_pa, "ldh": ldh_pa,
+        "sbp": sbp_pa, "dbp": dbp_pa,
+    }
+
+    # Compute organ clocks; tolerate missing models by leaving values as None.
+    _metabolic_age = compute_metabolic_age(
+        hba1c_pa, total_chol_pa, hdl_pa, bmi_pa, waist_pa, sbp_pa, dbp_pa)
+    _liver_age = compute_liver_age(
+        albumin, alkphos, tbili_pa, tprot_pa, plt_pa, ldh_pa)
+    _egfr_pa = ckd_epi_2021(creatinine, age, sex)
+    _kidney_age = compute_kidney_age(creatinine, bun_pa, ua_pa, _egfr_pa)
+
+    rpt_organ_ages = {
+        "metabolic_age":   _metabolic_age,
+        "metabolic_delta": (_metabolic_age - age) if _metabolic_age is not None else None,
+        "liver_age":       _liver_age,
+        "liver_delta":     (_liver_age - age) if _liver_age is not None else None,
+        "kidney_age":      _kidney_age,
+        "kidney_delta":    (_kidney_age - age) if _kidney_age is not None else None,
+    }
+
+    # PhenoAge contributions - inline reference means (NHANES adult population)
+    # so the Reports tab works even without the parquet loaded in this session.
+    _PHENOAGE_RPT_REF = {
+        "albumin_si": 43.0, "creatinine_si": 79.56, "glucose_si": 5.27,
+        "ln_crp": 0.405, "lymph_pct": 30.0, "mcv": 90.0,
+        "rdw": 13.0, "alkphos": 70.0, "wbc": 6.5,
+    }
+    _PHENOAGE_RPT_COEFFS = {
+        "albumin_si": -0.03359355, "creatinine_si": 0.009506491,
+        "glucose_si": 0.1953192, "ln_crp": 0.09536762,
+        "lymph_pct": -0.01199984, "mcv": 0.02676401,
+        "rdw": 0.3306156, "alkphos": 0.001868778, "wbc": 0.05542406,
+    }
+    _PHENOAGE_RPT_LABEL = {
+        "albumin_si": "Albumin", "creatinine_si": "Creatinine",
+        "glucose_si": "Glucose", "ln_crp": "CRP",
+        "lymph_pct": "Lymphocyte %", "mcv": "MCV", "rdw": "RDW",
+        "alkphos": "Alkaline phosphatase", "wbc": "WBC",
+    }
+    _pat_pa_vals = {
+        "albumin_si":    albumin * 10.0,
+        "creatinine_si": creatinine * 88.4,
+        "glucose_si":    glucose / 18.02,
+        "ln_crp":        math.log(max(crp, 0.01)),
+        "lymph_pct":     lymph,
+        "mcv":           mcv,
+        "rdw":           rdw,
+        "alkphos":       alkphos,
+        "wbc":           wbc,
+    }
+    _pheno_contribs = {
+        _PHENOAGE_RPT_LABEL[k]:
+            _PHENOAGE_RPT_COEFFS[k] * (_pat_pa_vals[k] - _PHENOAGE_RPT_REF[k])
+        for k in _PHENOAGE_RPT_COEFFS
+    }
+    _metab_contribs  = metabolic_contributions(
+        hba1c_pa, total_chol_pa, hdl_pa, bmi_pa, waist_pa, sbp_pa, dbp_pa) or {}
+    _liver_contribs  = liver_contributions(
+        albumin, alkphos, tbili_pa, tprot_pa, plt_pa, ldh_pa) or {}
+    _kidney_contribs = kidney_contributions(
+        creatinine, bun_pa, ua_pa, _egfr_pa) or {}
+
+    rpt_contributions = {
+        "PhenoAge":      _pheno_contribs,
+        "Metabolic age": _metab_contribs,
+        "Liver age":     _liver_contribs,
+        "Kidney age":    _kidney_contribs,
+    }
+    rpt_phenoage = {
+        "phenoage":      phenoage,
+        "delta":         delta,
+        "mortality_10y": mortality,
+    }
+
+    # Two side-by-side report cards
+    rcol_a, rcol_b = st.columns(2)
+    with rcol_a:
+        st.markdown(
+            f"""
+            <div style='background:{LIGHT_BG};border-left:5px solid {NAVY};
+                        padding:20px;border-radius:6px;height:260px;'>
+            <div style='color:{NAVY};font-weight:700;font-size:18px;
+                        margin-bottom:8px;'>Patient Report</div>
+            <div style='color:#1A1A2E;font-size:13px;line-height:1.55;'>
+                A comprehensive INEXION-branded guidebook in patient-friendly
+                language. Explains every lab value plainly, walks through
+                biological / metabolic / liver / kidney age, the population
+                percentile, and prioritized lifestyle recommendations the
+                patient can act on this month. Written at an ~8th-grade
+                reading level.
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("")
+        if st.button("Generate Patient Report",
+                      key="gen_pt_rpt", type="primary", use_container_width=True):
+            try:
+                from src.reports import build_patient_report
+                with st.spinner("Generating Patient Report..."):
+                    pt_bytes = build_patient_report(
+                        patient=rpt_patient,
+                        labs=rpt_labs,
+                        phenoage=rpt_phenoage,
+                        organ_ages=rpt_organ_ages,
+                        contributions=rpt_contributions,
+                        percentile=None,
+                        logo_path=_LOGO_PATH_RPT,
+                    )
+                st.session_state["pa_patient_report_bytes"] = pt_bytes
+                st.success("Patient Report ready - download below.")
+            except Exception as e:
+                st.error(f"Could not generate Patient Report: {e}")
+
+        if st.session_state.get("pa_patient_report_bytes"):
+            st.download_button(
+                "⬇ Download Patient Report (.docx)",
+                data=st.session_state["pa_patient_report_bytes"],
+                file_name=(
+                    f"INEXION_Patient_Report_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+                ),
+                mime="application/vnd.openxmlformats-officedocument."
+                     "wordprocessingml.document",
+                key="dl_pt_rpt",
+                use_container_width=True,
+            )
+
+    with rcol_b:
+        st.markdown(
+            f"""
+            <div style='background:{LIGHT_BG};border-left:5px solid {GOLD};
+                        padding:20px;border-radius:6px;height:260px;'>
+            <div style='color:{NAVY};font-weight:700;font-size:18px;
+                        margin-bottom:8px;'>Physician Report</div>
+            <div style='color:#1A1A2E;font-size:13px;line-height:1.55;'>
+                A clinical decision-support document at clinician health
+                literacy. Surfaces biomarker contribution analysis - which
+                markers most accelerate or decelerate this patient's age
+                across all four clocks - and ranks intervention targets by
+                predicted &Delta;-age impact with concrete approach options.
+                Includes a full lab reference table.
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("")
+        if st.button("Generate Physician Report",
+                      key="gen_phys_rpt", use_container_width=True):
+            try:
+                from src.reports import build_physician_report
+                with st.spinner("Generating Physician Report..."):
+                    phys_bytes = build_physician_report(
+                        patient=rpt_patient,
+                        labs=rpt_labs,
+                        phenoage=rpt_phenoage,
+                        organ_ages=rpt_organ_ages,
+                        contributions=rpt_contributions,
+                        percentile=None,
+                        logo_path=_LOGO_PATH_RPT,
+                    )
+                st.session_state["pa_phys_report_bytes"] = phys_bytes
+                st.success("Physician Report ready - download below.")
+            except Exception as e:
+                st.error(f"Could not generate Physician Report: {e}")
+
+        if st.session_state.get("pa_phys_report_bytes"):
+            st.download_button(
+                "⬇ Download Physician Report (.docx)",
+                data=st.session_state["pa_phys_report_bytes"],
+                file_name=(
+                    f"INEXION_Physician_Report_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+                ),
+                mime="application/vnd.openxmlformats-officedocument."
+                     "wordprocessingml.document",
+                key="dl_phys_rpt",
+                use_container_width=True,
+            )
+
+    st.markdown("")
+    st.caption(
+        "Reports generate at the moment you click and reflect the current "
+        "values in the input section. Narrative content is written by Claude "
+        "Haiku from the deterministic biomarker data; if the API key is "
+        "unavailable the report falls back to static templates so the "
+        "deliverable still ships. Both reports are INEXION-branded with the "
+        "registry logo, navy + gold palette, and standard disclaimers."
+    )
