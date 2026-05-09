@@ -1809,14 +1809,13 @@ with tabs[6]:
 
         if st.session_state.get("pa_patient_report_bytes"):
             st.download_button(
-                "⬇ Download Patient Report (.docx)",
+                "⬇ Download Patient Report (.pdf)",
                 data=st.session_state["pa_patient_report_bytes"],
                 file_name=(
                     f"INEXION_Patient_Report_"
-                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
                 ),
-                mime="application/vnd.openxmlformats-officedocument."
-                     "wordprocessingml.document",
+                mime="application/pdf",
                 key="dl_pt_rpt",
                 use_container_width=True,
             )
@@ -1862,14 +1861,13 @@ with tabs[6]:
 
         if st.session_state.get("pa_phys_report_bytes"):
             st.download_button(
-                "⬇ Download Physician Report (.docx)",
+                "⬇ Download Physician Report (.pdf)",
                 data=st.session_state["pa_phys_report_bytes"],
                 file_name=(
                     f"INEXION_Physician_Report_"
-                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
                 ),
-                mime="application/vnd.openxmlformats-officedocument."
-                     "wordprocessingml.document",
+                mime="application/pdf",
                 key="dl_phys_rpt",
                 use_container_width=True,
             )
