@@ -20,7 +20,7 @@ except Exception:
 import streamlit as st
 import pandas as pd
 from pathlib import Path
-from src.config import (
+from src.config import (data_exists, 
     APP_TITLE, APP_VERSION, NAVY, GOLD, TEAL, CORAL,
     NHANES_PARQUET, HRS_VBS_PARQUET, HRS_DBS_PARQUET,
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET, HRS_PUBLIC_PARQUET,
@@ -83,26 +83,26 @@ def get_registry_stats():
     stats = {}
     total_participants = 0
 
-    if NHANES_PARQUET.exists():
+    if data_exists(NHANES_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
         df = pd.read_parquet(NHANES_PARQUET, columns=['seqn'])
         stats['nhanes_n'] = len(df)
         total_participants += len(df)
 
-    if HRS_VBS_PARQUET.exists():
+    if data_exists(HRS_VBS_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
         df = pd.read_parquet(HRS_VBS_PARQUET, columns=['hhidpn'])
         stats['hrs_vbs_n'] = len(df)
         total_participants += len(df)
 
-    if HRS_DBS_PARQUET.exists():
+    if data_exists(HRS_DBS_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
         df = pd.read_parquet(HRS_DBS_PARQUET, columns=['hhidpn'])
         stats['hrs_dbs_n'] = df['hhidpn'].nunique()
         stats['hrs_dbs_obs'] = len(df)
 
-    if HRS_EPIGEN_PARQUET.exists():
+    if data_exists(HRS_EPIGEN_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
         df = pd.read_parquet(HRS_EPIGEN_PARQUET, columns=['hhidpn'])
         stats['hrs_epi_n'] = len(df)
 
-    if HRS_POA_PARQUET.exists():
+    if data_exists(HRS_POA_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
         df = pd.read_parquet(HRS_POA_PARQUET, columns=['hhidpn'])
         stats['hrs_poa_n'] = len(df)
 
