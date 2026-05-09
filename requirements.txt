@@ -1,5 +1,5 @@
-# INEXION Registry app - rebuild marker 2026-05-09 (Phase 2 Validation: lifelines)
-streamlit>=1.36
+# INEXION Registry app - rebuild marker 2026-05-09 (Phase 8.12: st.navigation sidebar refactor; bump streamlit floor to force container rebuild)
+streamlit>=1.45,<2
 scipy>=1.11
 s3fs>=2024.1.0
 boto3>=1.34
