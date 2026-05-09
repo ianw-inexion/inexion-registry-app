@@ -18,10 +18,31 @@ from .config import NHANES_PARQUET
 @st.cache_resource
 def get_connection():
     """One DuckDB connection per Streamlit session. Registers the parquet as a view."""
+    from .config import IS_S3
     con = duckdb.connect(database=":memory:")
+    # Build path string — works for both local Path objects and S3 URIs
+    if IS_S3:
+        parquet_path = str(NHANES_PARQUET)
+        # Install and load httpfs for S3 access
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+            import os
+            aws_key    = os.environ.get("AWS_ACCESS_KEY_ID", "")
+            aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+            aws_region = os.environ.get("AWS_DEFAULT_REGION", "us-east-2")
+            if aws_key:
+                con.execute(f"""
+                    SET s3_access_key_id='{aws_key}';
+                    SET s3_secret_access_key='{aws_secret}';
+                    SET s3_region='{aws_region}';
+                """)
+        except Exception:
+            pass
+    else:
+        parquet_path = NHANES_PARQUET.as_posix()
     con.execute(
         f"CREATE OR REPLACE VIEW nhanes AS "
-        f"SELECT * FROM '{NHANES_PARQUET.as_posix()}'"
+        f"SELECT * FROM '{parquet_path}'"
     )
     return con
 
