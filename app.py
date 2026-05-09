@@ -19,7 +19,6 @@ except Exception:
     pass
 
 import os
-import base64
 import streamlit as st
 from src.config import APP_TITLE, NAVY, GOLD
 
@@ -32,31 +31,21 @@ st.set_page_config(
 
 
 # ---------------------------------------------------------------------------
-# Sidebar logo - inject a centered <img> via HTML so we control size + alignment
-# (st.logo size=large is too small at sidebar width)
+# Sidebar logo - st.logo positions this above the nav specifically. CSS
+# below enlarges the rendered image since size="large" alone isn't big enough.
 # ---------------------------------------------------------------------------
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "inexion_logo.png")
 if os.path.exists(_LOGO_PATH):
-    with open(_LOGO_PATH, "rb") as _f:
-        _LOGO_B64 = base64.b64encode(_f.read()).decode("ascii")
-    st.sidebar.markdown(
-        f"""
-        <div style='display:flex;justify-content:center;align-items:center;
-                    padding:18px 12px 14px 12px;
-                    border-bottom:1px solid rgba(13,27,62,0.08);
-                    margin-bottom:8px;'>
-            <img src='data:image/png;base64,{_LOGO_B64}'
-                 style='width:80%; max-width:200px; height:auto;
-                        display:block;' />
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.logo(_LOGO_PATH, size="large", icon_image=_LOGO_PATH)
 
 
 # ---------------------------------------------------------------------------
-# Custom CSS - section headers (all-caps bold, darker bg) + hover effects +
-# active-state fix (ensure white text shows on navy active link).
+# Custom CSS - logo enlargement + section headers (UPPERCASE, BOLD, larger,
+# tinted bg) + hover effects + active-state fix.
+#
+# Multiple fallback selectors used because Streamlit's emotion-cache class
+# names change between versions; we target by stable testids and structural
+# selectors instead.
 # ---------------------------------------------------------------------------
 st.markdown(
     f"""
@@ -66,28 +55,63 @@ st.markdown(
             background: linear-gradient(180deg, #FAFAFC 0%, #F2F4F8 100%);
         }}
 
-        /* Hide Streamlit's default page-name header at the very top of the
-           nav (which would duplicate "app" / "Home" when section grouping
-           is active). */
-        [data-testid="stSidebarNav"] > ul > div:first-child {{
-            display: none;
+        /* Logo container - st.logo renders into a stLogo-tagged element.
+           Enlarge the inner image and center-align. */
+        [data-testid="stSidebar"] [data-testid="stLogo"],
+        [data-testid="stSidebarHeader"] [data-testid="stLogo"] {{
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            padding: 22px 12px 14px 12px !important;
+            border-bottom: 1px solid rgba(13, 27, 62, 0.08);
+            margin-bottom: 8px;
+            width: 100% !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stLogo"] img,
+        [data-testid="stSidebarHeader"] [data-testid="stLogo"] img {{
+            width: 80% !important;
+            max-width: 220px !important;
+            height: auto !important;
+            min-height: 56px !important;
         }}
 
-        /* Section headers - bold, uppercase, darker tinted background */
-        [data-testid="stSidebarNav"] section header,
-        [data-testid="stSidebarNav"] .st-emotion-cache-* h2,
-        [data-testid="stSidebarNav"] li > span:not(:has(a)),
-        section[data-testid="stSidebarNav"] li[aria-haspopup="true"] {{
+        /* SECTION HEADERS - all caps, bold, larger, navy on tinted bg.
+           Streamlit's st.navigation renders each group label as a non-link
+           div inside stSidebarNav. We target multiple possible structures
+           to survive minor version changes. */
+        [data-testid="stSidebarNav"] li > div:not(:has(a)),
+        [data-testid="stSidebarNav"] ul > li:has(+ ul) > div,
+        [data-testid="stSidebarNav"] [role="heading"],
+        [data-testid="stSidebarNav"] h2,
+        [data-testid="stSidebarNav"] h3,
+        [data-testid="stSidebarNav"] section > h2,
+        [data-testid="stSidebarNav"] section > div:not(:has(a)):first-child,
+        [data-testid="stSidebarNav"] > ul > div:not(:has(a)),
+        [data-testid="stSidebarNav"] > div > div > div:first-child:not(:has(a)) {{
             text-transform: uppercase !important;
             letter-spacing: 1.5px !important;
-            font-size: 11px !important;
+            font-size: 13px !important;
             font-weight: 800 !important;
             color: {NAVY} !important;
-            background-color: #E8EAF0 !important;
+            background-color: #E1E5ED !important;
             padding: 10px 16px !important;
             border-radius: 4px !important;
-            margin: 12px 8px 4px 8px !important;
+            margin: 14px 8px 4px 8px !important;
             display: block !important;
+        }}
+
+        /* Belt and suspenders for the section header text node itself
+           (sometimes wrapped in a span or p) */
+        [data-testid="stSidebarNav"] li > div:not(:has(a)) span,
+        [data-testid="stSidebarNav"] li > div:not(:has(a)) p,
+        [data-testid="stSidebarNav"] [role="heading"] span,
+        [data-testid="stSidebarNav"] h2 span,
+        [data-testid="stSidebarNav"] h3 span {{
+            text-transform: uppercase !important;
+            font-size: 13px !important;
+            font-weight: 800 !important;
+            letter-spacing: 1.5px !important;
+            color: {NAVY} !important;
         }}
 
         /* Nav link rows - rest state */
@@ -99,6 +123,9 @@ st.markdown(
                         transform 120ms ease, box-shadow 120ms ease !important;
             color: #1A1A2E !important;
             font-size: 14px !important;
+            text-transform: none !important;
+            font-weight: 400 !important;
+            letter-spacing: normal !important;
         }}
 
         /* Nav link rows - hover state */
@@ -109,9 +136,7 @@ st.markdown(
             box-shadow: 0 1px 3px rgba(13, 27, 62, 0.08);
         }}
 
-        /* Active nav link - navy bg, white text. Belt-and-suspenders: also
-           target child span / p / div to win specificity battles with
-           Streamlit's default rules. */
+        /* Active nav link - navy bg, white text */
         [data-testid="stSidebarNav"] a[aria-current="page"],
         [data-testid="stSidebarNav"] a[aria-current="page"] *,
         [data-testid="stSidebarNav"] a[aria-current="page"] span,
@@ -134,9 +159,8 @@ st.markdown(
 
 # ---------------------------------------------------------------------------
 # Navigation - grouped pages with friendly labels.
-# Note: Home is intentionally placed under "Dashboard" rather than its own
-# "Home" section, to avoid the visual duplication of section header "Home"
-# above page link "Home".
+# "Dashboard" group label avoids the visual duplication that "Home" group
+# label would cause (since the page inside is also "Home").
 # ---------------------------------------------------------------------------
 _PAGES = {
     "Dashboard": [
