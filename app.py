@@ -1,10 +1,10 @@
 """
-INEXION Longevity Registry — app entry point.
+INEXION Longevity Registry - app entry point.
 """
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Streamlit Cloud: load secrets into environment ────────────────────────────
+# Streamlit Cloud: load secrets into environment
 # When deployed on Streamlit Cloud, secrets are set in the dashboard and
 # exposed via st.secrets. Promote them to env vars so the rest of the app
 # (including src/config.py) picks them up transparently.
@@ -20,10 +20,11 @@ except Exception:
 import streamlit as st
 import pandas as pd
 from pathlib import Path
-from src.config import (data_exists, 
+from src.config import (data_exists,
     APP_TITLE, APP_VERSION, NAVY, GOLD, TEAL, CORAL,
     NHANES_PARQUET, HRS_VBS_PARQUET, HRS_DBS_PARQUET,
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET, HRS_PUBLIC_PARQUET,
+    MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
 )
 
 st.set_page_config(
@@ -41,14 +42,14 @@ st.markdown(
         <div style='color:white;font-size:28px;font-weight:700;margin-top:4px;'>
             Longevity Data Registry</div>
         <div style='color:#C9CBD4;font-size:14px;margin-top:4px;'>
-            HORAL — Healthspan Outcomes Registry for Active Longevity &nbsp;·&nbsp; v{APP_VERSION}
+            HORAL - Healthspan Outcomes Registry for Active Longevity &nbsp;-&nbsp; v{APP_VERSION}
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# Sidebar
 with st.sidebar:
     st.markdown(f"**INEXION Registry**")
     st.caption(f"v{APP_VERSION}")
@@ -57,6 +58,8 @@ with st.sidebar:
         "**Navigation**\n\n"
         "- NHANES Explorer\n"
         "- HRS Explorer\n"
+        "- MIDUS Explorer\n"
+        "- Market Intelligence\n"
         "- Biological Age Calculator\n"
         "- Normative Reference\n"
         "- Intervention Simulator\n"
@@ -66,70 +69,71 @@ with st.sidebar:
         "- Admin"
     )
     st.markdown("---")
-    st.caption("Prototype build — local auth, no PHI.")
+    st.caption("Prototype build - local auth, no PHI.")
 
-# ── Registry-wide stats ───────────────────────────────────────────────────────
-datasets = {
-    "NHANES": (NHANES_PARQUET, "n_total"),
-    "HRS VBS": (HRS_VBS_PARQUET, None),
-    "HRS DBS": (HRS_DBS_PARQUET, None),
-    "HRS Clocks": (HRS_EPIGEN_PARQUET, None),
-    "HRS PoA": (HRS_POA_PARQUET, None),
-    "HRS Survey": (HRS_PUBLIC_PARQUET, None),
-}
-
+# Registry-wide stats
 @st.cache_data
 def get_registry_stats():
     stats = {}
-    total_participants = 0
 
-    if data_exists(NHANES_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
+    if data_exists(NHANES_PARQUET):
         df = pd.read_parquet(NHANES_PARQUET, columns=['seqn'])
         stats['nhanes_n'] = len(df)
-        total_participants += len(df)
 
-    if data_exists(HRS_VBS_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
+    if data_exists(HRS_VBS_PARQUET):
         df = pd.read_parquet(HRS_VBS_PARQUET, columns=['hhidpn'])
         stats['hrs_vbs_n'] = len(df)
-        total_participants += len(df)
 
-    if data_exists(HRS_DBS_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
+    if data_exists(HRS_DBS_PARQUET):
         df = pd.read_parquet(HRS_DBS_PARQUET, columns=['hhidpn'])
         stats['hrs_dbs_n'] = df['hhidpn'].nunique()
         stats['hrs_dbs_obs'] = len(df)
 
-    if data_exists(HRS_EPIGEN_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
+    if data_exists(HRS_EPIGEN_PARQUET):
         df = pd.read_parquet(HRS_EPIGEN_PARQUET, columns=['hhidpn'])
         stats['hrs_epi_n'] = len(df)
 
-    if data_exists(HRS_POA_PARQUET) if hasattr(NHANES_PARQUET, 'exists') else True:
+    if data_exists(HRS_POA_PARQUET):
         df = pd.read_parquet(HRS_POA_PARQUET, columns=['hhidpn'])
         stats['hrs_poa_n'] = len(df)
+
+    if data_exists(MIDUS_BIO_PARQUET):
+        df = pd.read_parquet(MIDUS_BIO_PARQUET, columns=['midus_id'])
+        stats['midus_bio_n'] = len(df)
+
+    if data_exists(MIDUS_COG_PARQUET):
+        df = pd.read_parquet(MIDUS_COG_PARQUET, columns=['midus_id'])
+        stats['midus_cog_n'] = len(df)
 
     stats['total_observations'] = (
         stats.get('nhanes_n', 0) +
         stats.get('hrs_vbs_n', 0) +
         stats.get('hrs_dbs_obs', 0) +
         stats.get('hrs_epi_n', 0) +
-        stats.get('hrs_poa_n', 0)
+        stats.get('hrs_poa_n', 0) +
+        stats.get('midus_bio_n', 0)
     )
-    stats['datasets_loaded'] = sum(1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n'] if k in stats)
+    stats['datasets_loaded'] = sum(
+        1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n','midus_bio_n']
+        if k in stats
+    )
     return stats
 
 try:
     s = get_registry_stats()
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Datasets loaded", s.get('datasets_loaded', 0))
-    c2.metric("NHANES participants", f"{s.get('nhanes_n',0):,}")
+    c2.metric("NHANES", f"{s.get('nhanes_n',0):,}")
     c3.metric("HRS VBS (PhenoAge)", f"{s.get('hrs_vbs_n',0):,}")
     c4.metric("HRS DBS respondents", f"{s.get('hrs_dbs_n',0):,}")
     c5.metric("HRS DunedinPACE", f"{s.get('hrs_poa_n',0):,}")
+    c6.metric("MIDUS biomarker", f"{s.get('midus_bio_n',0):,}")
 except Exception as e:
     st.warning(f"Could not load registry stats: {e}")
 
 st.markdown("---")
 
-# ── What's in the registry ────────────────────────────────────────────────────
+# What's in the registry
 st.markdown("### What's in the registry")
 
 col1, col2 = st.columns(2)
@@ -139,26 +143,34 @@ with col1:
         f"""
         <div style='background:#F2F4F8;border-left:4px solid {NAVY};
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
-            <div style='font-weight:700;color:{NAVY};font-size:16px;'>NHANES 2001–2018</div>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>NHANES 2001-2018</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                44,898 adults · 9 cycles · PhenoAge + KDM computed<br>
-                <strong>Finding:</strong> U.S. adults aged 40–60 are aging 6.8 years faster biologically than in 2009.
+                44,898 adults - 9 cycles - PhenoAge + KDM computed<br>
+                <strong>Finding:</strong> U.S. adults aged 40-60 are aging 6.8 years faster biologically than in 2009.
             </div>
         </div>
         <div style='background:#F2F4F8;border-left:4px solid {GOLD};
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>HRS 2016 Venous Blood Study</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                9,567 adults 50+ · PhenoAge from real venous blood biomarkers<br>
-                <strong>Finding:</strong> Highest biological age quintile is nearly 2× as likely to be cognitively impaired (27.9% vs 14.2%).
+                9,567 adults 50+ - PhenoAge from real venous blood biomarkers<br>
+                <strong>Finding:</strong> Highest biological age quintile is nearly 2x as likely to be cognitively impaired (27.9% vs 14.2%).
             </div>
         </div>
         <div style='background:#F2F4F8;border-left:4px solid {TEAL};
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
-            <div style='font-weight:700;color:{NAVY};font-size:16px;'>HRS DBS Longitudinal (2006–2016)</div>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>HRS DBS Longitudinal (2006-2016)</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                22,378 unique respondents · 6 waves · HbA1c, CRP, cholesterol, HDL, cystatin-C<br>
+                22,378 unique respondents - 6 waves - HbA1c, CRP, cholesterol, HDL, cystatin-C<br>
                 Enables longitudinal biomarker trajectory analysis.
+            </div>
+        </div>
+        <div style='background:#F2F4F8;border-left:4px solid {NAVY};
+                    padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>MIDUS (M2 + Refresher 1 + M3, 2004-2022)</div>
+            <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
+                2,865 biomarker observations across 3 waves + 3,291 M3 cognitive (BTACT) - KDM bioage with within-MIDUS reference parameters<br>
+                Distinctive for the registry: 9-marker inflammation panel (CRP, IL-6/8/10, TNF-alpha, fibrinogen, sICAM, sE-selectin, sUPAR), neuroendocrine (DHEA-S, IGF-1, urinary cortisol/catecholamines), bone turnover.
             </div>
         </div>
         """,
@@ -172,7 +184,7 @@ with col2:
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>HRS Epigenetic Clocks</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                4,018 respondents · GrimAge2 + DunedinPACE (methylation-based)<br>
+                4,018 respondents - GrimAge2 + DunedinPACE (methylation-based)<br>
                 Enables direct comparison of clinical biomarker vs. epigenetic clock approaches.
             </div>
         </div>
@@ -180,16 +192,24 @@ with col2:
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>HRS Pace of Aging (DunedinPACE)</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                13,358 respondents · Balachandran et al. 2025, Nature Aging<br>
+                13,358 respondents - Balachandran et al. 2025, Nature Aging<br>
                 Mean DunedinPACE: 1.49 years per calendar year (population average = 1.0).
+            </div>
+        </div>
+        <div style='background:#F2F4F8;border-left:4px solid {GOLD};
+                    padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>BRFSS 2024 - Market Intelligence</div>
+            <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
+                457,670 U.S. adults - State and metro-level longevity market scoring<br>
+                Identifies where INEXION-aligned consumer demand is strongest (DC corridor, MA, NH, UT, CO).
             </div>
         </div>
         <div style='background:#F2F4F8;border-left:4px solid #6B6B8D;
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>Incoming</div>
             <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
-                UK Biobank (application in progress) · All of Us NIH (Anant, Tier 2 pending) ·
-                MIDUS (Anant, DUA pending) · AgelessRx + Healthspan (DUA in review)
+                UK Biobank (application in progress) - All of Us NIH (Anant, Tier 2 pending) -
+                MIDUS CMS-linked restricted tier (Anant) - AgelessRx + Healthspan (DUA in review)
             </div>
         </div>
         """,
@@ -202,19 +222,24 @@ st.markdown("### What you can do")
 left, right = st.columns(2)
 with left:
     st.markdown(
-        "**NHANES Explorer** — filter the 44,898-person NHANES cohort by age, sex, "
+        "**NHANES Explorer** - filter the 44,898-person NHANES cohort by age, sex, "
         "race, BMI, and biomarker values. See live counts, descriptive summaries, "
         "cycle trends, and export cohort slices as CSV.\n\n"
-        "**HRS Explorer** — explore venous blood PhenoAge scores, epigenetic clocks, "
-        "longitudinal DBS biomarker trends (2006–2016), cognitive outcomes, "
-        "and functional status across five tabs."
+        "**HRS Explorer** - explore venous blood PhenoAge scores, epigenetic clocks, "
+        "longitudinal DBS biomarker trends (2006-2016), cognitive outcomes, "
+        "and functional status across five tabs.\n\n"
+        "**MIDUS Explorer** - inflammation-panel-first cohort view across 3 biomarker "
+        "waves (2004-2022). Tabs: Overview, Inflammation Panel, Cardiometabolic, "
+        "Neuroendocrine, Wave Comparison, Cognition (M3 BTACT)."
     )
 with right:
     st.markdown(
-        "**Biological Age Calculator** — enter any patient's 9 standard lab values "
+        "**Biological Age Calculator** - enter any patient's 9 standard lab values "
         "(or upload a PDF lab report) to compute PhenoAge and biological age delta.\n\n"
-        "**Dataset Catalog** — full inventory of what's loaded, what's pending "
-        "access, and what's incoming. **Variable Dictionary** — definitions, units, "
+        "**Research Workbench** - no-code hypothesis testing across NHANES, HRS, and MIDUS. "
+        "Partial correlations, OLS regression, and scatter plots.\n\n"
+        "**Dataset Catalog** - full inventory of what's loaded, what's pending "
+        "access, and what's incoming. **Variable Dictionary** - definitions, units, "
         "and groupings for all registry variables."
     )
 
@@ -222,5 +247,6 @@ st.markdown("---")
 st.caption(
     "All source data is de-identified. No PHI is present. "
     "NHANES: CDC public-use files. HRS: University of Michigan / NIA restricted access under RDA. "
-    "Prototype build — auth, audit logging, and remote object storage added in deployment phase."
+    "MIDUS: ICPSR public-use files (CMS-linked restricted tier in progress). "
+    "Prototype build - auth, audit logging, and remote object storage added in deployment phase."
 )
