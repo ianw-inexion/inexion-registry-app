@@ -55,6 +55,15 @@ WHITE   = HexColor("#FFFFFF")
 ROW_ALT = HexColor("#FAFAFC")
 BORDER  = HexColor("#C7CCDB")
 
+# Lab-status pastels for color-coded value cells. Backgrounds are tinted
+# enough to scan at a glance without overpowering the surrounding text.
+STATUS_GREEN_BG  = HexColor("#D4EDDA")
+STATUS_YELLOW_BG = HexColor("#FFF3CD")
+STATUS_RED_BG    = HexColor("#F8D7DA")
+STATUS_GREEN_FG  = HexColor("#155724")
+STATUS_YELLOW_FG = HexColor("#856404")
+STATUS_RED_FG    = HexColor("#721C24")
+
 # Page geometry
 PAGE_W, PAGE_H = LETTER
 LMARGIN = RMARGIN = 2.0 * cm
@@ -255,6 +264,91 @@ LAB_METADATA: dict[str, dict[str, Any]] = {
             "rest between beats."
         ),
     },
+}
+
+
+# ---------------------------------------------------------------------------
+# Lab thresholds for status classification.
+#   Green:  value within the typical-healthy band
+#   Yellow: borderline / one tier outside (e.g. prediabetes for HbA1c)
+#   Red:    significantly outside (e.g. clinical-cutoff diabetes range)
+# Single-sided ranges (CRP, HbA1c, total chol, BPs) use 0 as the unused floor.
+# HDL is sex-dependent and handled in _classify_lab().
+# ---------------------------------------------------------------------------
+LAB_THRESHOLDS: dict[str, dict[str, tuple[float, float]]] = {
+    "albumin":       {"green": (3.5, 5.5),  "yellow": (3.0, 6.0)},
+    "creatinine":    {"green": (0.6, 1.3),  "yellow": (0.5, 1.5)},
+    "glucose":       {"green": (70, 99),    "yellow": (60, 125)},
+    "bun":           {"green": (7, 20),     "yellow": (5, 26)},
+    "uric_acid":     {"green": (3.5, 7.2),  "yellow": (3.0, 8.5)},
+    "crp":           {"green": (0, 1.0),    "yellow": (0, 3.0)},
+    "lymph":         {"green": (20, 40),    "yellow": (15, 50)},
+    "wbc":           {"green": (4.5, 11),   "yellow": (3.5, 14)},
+    "mcv":           {"green": (80, 100),   "yellow": (75, 105)},
+    "rdw":           {"green": (11.5, 14.5),"yellow": (10, 16)},
+    "hba1c":         {"green": (0, 5.7),    "yellow": (0, 6.4)},
+    "total_chol":    {"green": (0, 200),    "yellow": (0, 239)},
+    # HDL handled in _classify_lab() based on sex
+    "tbili":         {"green": (0.1, 1.2),  "yellow": (0.1, 2.0)},
+    "total_protein": {"green": (6.0, 8.3),  "yellow": (5.5, 9.0)},
+    "alkphos":       {"green": (40, 130),   "yellow": (30, 200)},
+    "platelet":      {"green": (150, 400),  "yellow": (100, 500)},
+    "ldh":           {"green": (140, 280),  "yellow": (140, 400)},
+    "sbp":           {"green": (0, 119),    "yellow": (0, 139)},
+    "dbp":           {"green": (0, 79),     "yellow": (0, 89)},
+}
+
+
+def _classify_lab(key: str, value: float, sex: str = "Male") -> str:
+    """Return 'green' | 'yellow' | 'red' | 'neutral' for a lab value."""
+    if key == "hdl":
+        # Sex-specific HDL cutoffs (NCEP / AHA convention)
+        if sex == "Female":
+            green_lo, yellow_lo = 50.0, 40.0
+        else:
+            green_lo, yellow_lo = 40.0, 35.0
+        if value >= green_lo:
+            return "green"
+        if value >= yellow_lo:
+            return "yellow"
+        return "red"
+    t = LAB_THRESHOLDS.get(key)
+    if t is None:
+        return "neutral"
+    g_lo, g_hi = t["green"]
+    y_lo, y_hi = t["yellow"]
+    if g_lo <= value <= g_hi:
+        return "green"
+    if y_lo <= value <= y_hi:
+        return "yellow"
+    return "red"
+
+
+# Patient-friendly labels + brief actionable hints for the 9 PhenoAge inputs.
+# Used by the "What's Driving Your Biological Age" section to translate
+# clinical marker names into something a non-clinician can act on.
+PHENOAGE_PATIENT_LABEL = {
+    "Albumin":              "Albumin (protein status)",
+    "Creatinine":           "Creatinine (kidney filtration)",
+    "Glucose":              "Glucose (blood sugar)",
+    "CRP":                  "CRP (inflammation marker)",
+    "Lymphocyte %":         "Lymphocyte % (immune balance)",
+    "MCV":                  "MCV (red blood cell size)",
+    "RDW":                  "RDW (red blood cell variation)",
+    "Alkaline phosphatase": "Alkaline phosphatase (liver/bone enzyme)",
+    "WBC":                  "WBC (white blood cell count)",
+}
+
+PHENOAGE_PATIENT_HINT = {
+    "Albumin":              "Healthy levels reflect good nutrition and liver function.",
+    "Creatinine":           "Reflects kidney filtration; hydration and muscle mass affect it.",
+    "Glucose":              "Diet quality, sleep, and exercise are the biggest movers.",
+    "CRP":                  "Driven by chronic inflammation - exercise, sleep, and a Mediterranean-style diet usually bring it down.",
+    "Lymphocyte %":         "Reflects immune-system balance; chronic stress and infections can shift it.",
+    "MCV":                  "Red cell size; B12, folate, and iron status matter most.",
+    "RDW":                  "Variation in red cell size; reflects bone-marrow health.",
+    "Alkaline phosphatase": "Liver and bone enzyme; usually responds to liver health and bone turnover.",
+    "WBC":                  "Reflects immune activity; chronic stress and inflammation can elevate it.",
 }
 
 
@@ -536,10 +630,15 @@ def _generate_patient_narrative(ctx: dict) -> dict:
 def _generate_physician_narrative(ctx: dict) -> dict:
     system = (
         "You are a clinical decision-support assistant for longevity-medicine "
-        "clinicians at INEXION. Write at a clinician-appropriate health-literacy "
-        "level: precise, quantitative, action-oriented. Cite contribution magnitudes "
-        "by name. Prioritize interventions with the highest predicted age-delta "
-        "improvement. Always return strictly valid JSON with no markdown fences."
+        "clinicians at INEXION, a longevity-focused medical practice. The reading "
+        "audience is a board-certified physician practicing longevity medicine, "
+        "comfortable with off-label gerotherapeutics and willing to consider "
+        "rapamycin, acarbose, metformin, GLP-1 agonists, SGLT2 inhibitors, "
+        "senolytics (dasatinib + quercetin), NAD precursors (NMN, NR), and other "
+        "longevity-medicine pharmacotherapies where evidence supports the "
+        "biomarker pathway being addressed. Write precisely, quantitatively, and "
+        "action-oriented. Cite contribution magnitudes by name. Always return "
+        "strictly valid JSON with no markdown fences."
     )
     user = (
         "Generate clinical decision-support content for a longevity clinic patient "
@@ -554,16 +653,29 @@ def _generate_physician_narrative(ctx: dict) -> dict:
         'all four clocks. Be quantitative - cite specific contribution magnitudes. '
         'Separate paragraphs with double newlines.",\n'
         '  "intervention_targets": [\n'
-        '     {"target": "<specific biomarker target value>", '
-        '"rationale": "<why this is the priority>", '
-        '"approach": "<concrete clinical approach: lifestyle, supplement, '
-        'pharmacologic options as appropriate>"}\n'
+        '     {"target": "<specific biomarker target value, e.g. \'Reduce hsCRP to '
+        '<1.0 mg/L\'>", '
+        '"rationale": "<why this is the priority - cite contribution magnitude>", '
+        '"approach": "<lifestyle baseline + nutraceutical options (e.g. omega-3, '
+        'curcumin, berberine, bergamot)>", '
+        '"longevity_rx": "<specific longevity-medicine pharmacologic options to '
+        'consider for this target. Be concrete: name agents (rapamycin, acarbose, '
+        'metformin, semaglutide/tirzepatide, empagliflozin, dasatinib+quercetin, '
+        'NMN, NR, low-dose lithium, low-dose naltrexone, statins, fibrates, etc.) '
+        'with brief mechanism against this biomarker pathway. Note off-label '
+        'status. If pharmacotherapy is not warranted for this target, write '
+        '\'No pharmacologic intervention warranted at this stage.\'>"}\n'
         "  ],\n"
-        '  "follow_up": "2-3 sentences on repeat testing cadence and any specialist '
-        'referrals worth considering"\n'
+        '  "follow_up": "2-3 sentences on repeat testing cadence (typical: 3-4 '
+        'months for biomarker recheck), any specialist referrals worth considering, '
+        "and which contribution to monitor most closely after intervention\"\n"
         "}\n"
-        "Provide 4-6 intervention_targets ranked by predicted impact. Do NOT include "
-        "markdown fences. Return the JSON only."
+        "Provide 4-6 intervention_targets ranked by predicted age-delta impact. "
+        "Tailor longevity_rx to this specific patient's biomarker profile - do not "
+        "list every gerotherapeutic. Match agent to target pathway: e.g., if "
+        "glucose is the top accelerator, lead with metformin / acarbose / GLP-1; "
+        "if inflammation, consider rapamycin + omega-3; if metabolic syndrome, "
+        "GLP-1 + SGLT2. Do NOT include markdown fences. Return the JSON only."
     )
     return _claude_call(system, user, max_tokens=3500) or {}
 
@@ -693,9 +805,34 @@ def _physician_static_bio(contributions: dict) -> str:
 
 
 def _physician_static_targets(contributions: dict) -> list[dict]:
+    """Fallback targets when Claude is unavailable. Pairs each top accelerator
+    with the most-mechanistically-aligned longevity Rx options."""
     pheno = contributions.get("PhenoAge", {})
     if not pheno:
         return []
+    # Mechanism-driven Rx hints keyed by PhenoAge biomarker.
+    rx_hints = {
+        "Glucose":      "Metformin (off-label longevity), acarbose, low-dose GLP-1 "
+                         "agonists; SGLT2 inhibitor if comorbid CV/renal risk.",
+        "CRP":          "Rapamycin (off-label, mTOR-mediated inflammation reduction), "
+                         "high-dose omega-3 (EPA/DHA 2-4 g/d), low-dose statin if CV "
+                         "risk warrants.",
+        "Creatinine":   "If trending up: SGLT2 inhibitor for renoprotection; review "
+                         "supplement load; recheck cystatin C.",
+        "Albumin":      "Address underlying nutrition or inflammation; rarely a "
+                         "primary pharmacologic target.",
+        "Lymphocyte %": "Rule out chronic viral burden; consider rapamycin if "
+                         "immunosenescence pattern (low lymph + high RDW).",
+        "MCV":          "B12/folate if macrocytic; iron studies if microcytic. "
+                         "Pharmacotherapy guided by underlying cause.",
+        "RDW":          "Iron / B12 / folate workup; rapamycin candidate if "
+                         "elevated with low lymphocytes.",
+        "Alkaline phosphatase": "Liver vs. bone fractionation; if hepatic, address "
+                                 "metabolic dysfunction-associated steatohepatitis "
+                                 "(MASH) - consider GLP-1, vitamin E, semaglutide.",
+        "WBC":          "Address inflammation pathway upstream; rapamycin and "
+                         "omega-3 if chronic elevation.",
+    }
     ranked = sorted(pheno.items(), key=lambda kv: kv[1] or 0, reverse=True)
     targets = []
     for marker, contrib in ranked[:5]:
@@ -705,10 +842,72 @@ def _physician_static_targets(contributions: dict) -> list[dict]:
             "target": f"Reduce {marker} contribution",
             "rationale": f"Currently driving {contrib:+.2f} yr PhenoAge "
                           "acceleration",
-            "approach": "Discuss lifestyle, supplement, or pharmacologic "
-                         "options targeting this marker; recheck in 3-4 months.",
+            "approach": "Lifestyle: optimize sleep, exercise (Z2 + resistance), "
+                         "Mediterranean-style diet, time-restricted eating. Recheck "
+                         "in 3-4 months.",
+            "longevity_rx": rx_hints.get(
+                marker, "Match longevity Rx to underlying pathway driving this "
+                         "biomarker; review off-label evidence with patient."),
         })
     return targets
+
+
+# ---------------------------------------------------------------------------
+# Status-aware lab table builder. Tints the value cell green/yellow/red
+# based on _classify_lab() and uses the matched dark text color for legibility.
+# ---------------------------------------------------------------------------
+def _status_lab_table(headers: list[str], rows: list[list[str]],
+                       statuses: list[str], value_col_idx: int,
+                       col_widths: list[float], styles,
+                       status_col_idx: int | None = None) -> Table:
+    """Branded lab table with per-row tinted cells driven by `statuses`.
+    `value_col_idx` is the column index of the patient's value (gets the
+    pastel background). `status_col_idx`, if provided, also gets tinted."""
+    head_cells = [Paragraph(h, styles["tablehead"]) for h in headers]
+    body_cells = [
+        [Paragraph(str(c), styles["tablecell"]) for c in r] for r in rows
+    ]
+    table = Table([head_cells] + body_cells, colWidths=col_widths,
+                   repeatRows=1)
+    bg_for_status = {
+        "green":  STATUS_GREEN_BG,
+        "yellow": STATUS_YELLOW_BG,
+        "red":    STATUS_RED_BG,
+    }
+    style_cmds = [
+        ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.25, BORDER),
+    ]
+    for i, status in enumerate(statuses, start=1):
+        bg = bg_for_status.get(status)
+        if bg:
+            style_cmds.append(("BACKGROUND", (value_col_idx, i),
+                                 (value_col_idx, i), bg))
+            if status_col_idx is not None:
+                style_cmds.append(("BACKGROUND", (status_col_idx, i),
+                                     (status_col_idx, i), bg))
+        else:
+            # Neutral rows still get alternating shading so they don't read flat
+            if i % 2 == 0:
+                style_cmds.append(("BACKGROUND", (0, i), (-1, i), ROW_ALT))
+    table.setStyle(TableStyle(style_cmds))
+    return table
+
+
+def _status_label(status: str) -> str:
+    """Patient-friendly label string for a lab status code."""
+    return {
+        "green":   "Normal",
+        "yellow":  "Borderline",
+        "red":     "Outside normal",
+        "neutral": "—",
+    }.get(status, "—")
 
 
 # ---------------------------------------------------------------------------
@@ -819,35 +1018,119 @@ def build_patient_report(
     for para in [p.strip() for p in organ_text.split("\n\n") if p.strip()]:
         flow.append(Paragraph(para, styles["body"]))
 
+    # ----- What's Driving Your Biological Age -----
+    # Two ranked lists: decelerators (helpers, green) and accelerators (focus
+    # areas, red), built from the PhenoAge contributions dict. Patient-friendly
+    # marker labels and one-line action hints make the section actionable
+    # without requiring clinical knowledge.
+    pheno_contrib = (contributions or {}).get("PhenoAge", {})
+    if pheno_contrib:
+        flow.append(Paragraph("What's Driving Your Biological Age",
+                                styles["h1"]))
+        flow.append(Paragraph(
+            "Different lab values pull your biological age up or down. The "
+            "markers below show which ones are working in your favor (helping "
+            "you stay biologically younger) versus which ones are pulling your "
+            "age up. Focusing on the right side is where the biggest "
+            "healthspan wins live.",
+            styles["body"],
+        ))
+
+        # Sort: most-negative-first for decelerators, most-positive-first for accelerators
+        sorted_contrib = sorted(pheno_contrib.items(), key=lambda kv: kv[1])
+        decelerators = [(m, c) for m, c in sorted_contrib if (c or 0) < -0.05][:4]
+        accelerators = list(reversed(
+            [(m, c) for m, c in sorted_contrib if (c or 0) > 0.05]))[:4]
+
+        # WORKING IN YOUR FAVOR (green)
+        flow.append(Paragraph(
+            "<b><font color='#155724'>WORKING IN YOUR FAVOR</font></b> "
+            "&mdash; helping you stay biologically younger",
+            styles["h2"],
+        ))
+        if decelerators:
+            for marker, contrib in decelerators:
+                label = PHENOAGE_PATIENT_LABEL.get(marker, marker)
+                hint  = PHENOAGE_PATIENT_HINT.get(marker, "")
+                line = (
+                    f"<b>{label}</b> &nbsp; "
+                    f"<font color='#155724'><b>{contrib:+.2f} years</b></font> "
+                    f"impact on biological age<br/>"
+                    f"<font color='#6B7280' size='9'><i>{hint}</i></font>"
+                )
+                flow.append(Paragraph(line, styles["rec"]))
+        else:
+            flow.append(Paragraph(
+                "No markers are significantly decelerating your biological "
+                "age right now.", styles["body"]))
+
+        # FOCUS AREAS (red)
+        flow.append(Paragraph(
+            "<b><font color='#721C24'>FOCUS AREAS</font></b> &mdash; pulling "
+            "your age up",
+            styles["h2"],
+        ))
+        if accelerators:
+            for marker, contrib in accelerators:
+                label = PHENOAGE_PATIENT_LABEL.get(marker, marker)
+                hint  = PHENOAGE_PATIENT_HINT.get(marker, "")
+                line = (
+                    f"<b>{label}</b> &nbsp; "
+                    f"<font color='#721C24'><b>+{contrib:.2f} years</b></font> "
+                    f"impact on biological age<br/>"
+                    f"<font color='#6B7280' size='9'><i>{hint}</i></font>"
+                )
+                flow.append(Paragraph(line, styles["rec"]))
+        else:
+            flow.append(Paragraph(
+                "No markers are significantly accelerating your biological "
+                "age right now - keep doing what you're doing.",
+                styles["body"]))
+
     # ----- Lab explanations -----
     flow.append(Paragraph("Your Lab Results Explained", styles["h1"]))
     flow.append(Paragraph(
-        "Each lab below shows your value, the typical healthy range, and "
-        "a plain explanation of what the test measures.",
+        "Each lab below shows your value with a color status: "
+        "<font color='#155724'><b>green = normal</b></font>, "
+        "<font color='#856404'><b>yellow = borderline</b></font>, or "
+        "<font color='#721C24'><b>red = outside the typical healthy range</b></font>. "
+        "The plain-language explanation tells you what the test is measuring.",
         styles["body"],
     ))
 
+    pat_sex = patient.get("sex", "Male")
     lab_rows = []
+    statuses = []
     for key, meta in LAB_METADATA.items():
         val = labs.get(key)
         if val is None:
             continue
         try:
-            val_str = f"{float(val):.2f} {meta['units']}"
+            val_f = float(val)
+            val_str = f"{val_f:.2f} {meta['units']}"
+            status = _classify_lab(key, val_f, pat_sex)
         except (TypeError, ValueError):
             val_str = str(val)
+            status = "neutral"
         lab_rows.append([
             f"<b>{meta['label']}</b>",
             val_str,
+            _status_label(status),
             meta["ref_range"],
             meta["patient_text"],
         ])
+        statuses.append(status)
+
     if lab_rows:
-        flow.append(_data_table(
-            ["Test", "Your value", "Typical range", "What it means"],
-            lab_rows,
-            col_widths=[USABLE_W * 0.18, USABLE_W * 0.16,
-                          USABLE_W * 0.16, USABLE_W * 0.50],
+        flow.append(_status_lab_table(
+            headers=["Test", "Your value", "Status", "Typical range",
+                      "What it means"],
+            rows=lab_rows,
+            statuses=statuses,
+            value_col_idx=1,
+            status_col_idx=2,
+            col_widths=[USABLE_W * 0.16, USABLE_W * 0.13, USABLE_W * 0.13,
+                          USABLE_W * 0.14, USABLE_W * 0.44],
             styles=styles,
         ))
 
@@ -975,7 +1258,8 @@ def build_physician_report(
     for para in [p.strip() for p in bio_text.split("\n\n") if p.strip()]:
         flow.append(Paragraph(para, styles["body"]))
 
-    # Per-clock contribution tables (sorted by absolute Δ-years)
+    # Per-clock contribution tables (sorted by absolute Δ-years).
+    # Red BG for accelerators, green BG for decelerators, no tint for neutral.
     for clock_name, clock_contrib in (contributions or {}).items():
         if not clock_contrib:
             continue
@@ -984,18 +1268,27 @@ def build_physician_report(
         ranked = sorted(clock_contrib.items(),
                          key=lambda kv: abs(kv[1] or 0), reverse=True)
         c_rows = []
+        c_statuses = []
         for marker, contrib in ranked:
-            direction = ("Accelerator" if (contrib or 0) > 0
-                          else "Decelerator" if (contrib or 0) < 0
-                          else "Neutral")
+            c = contrib or 0
+            if c > 0.05:
+                direction, status = "Accelerator", "red"
+            elif c < -0.05:
+                direction, status = "Decelerator", "green"
+            else:
+                direction, status = "Neutral", "neutral"
             c_rows.append([
                 f"<b>{marker}</b>",
-                f"{contrib:+.2f}",
+                f"{c:+.2f}",
                 direction,
             ])
-        flow.append(_data_table(
-            ["Marker", "Δ years", "Direction"],
-            c_rows,
+            c_statuses.append(status)
+        flow.append(_status_lab_table(
+            headers=["Marker", "Δ years", "Direction"],
+            rows=c_rows,
+            statuses=c_statuses,
+            value_col_idx=1,
+            status_col_idx=2,
             col_widths=[USABLE_W * 0.40, USABLE_W * 0.20, USABLE_W * 0.40],
             styles=styles,
         ))
@@ -1006,15 +1299,24 @@ def build_physician_report(
         "Intervention Targets (ranked by predicted Δ-age impact)",
         styles["h1"],
     ))
+    flow.append(Paragraph(
+        "Each target lists a clinical priority, the rationale tied to "
+        "biomarker contribution, the lifestyle / nutraceutical approach, "
+        "and longevity-medicine pharmacologic options to consider for this "
+        "specific patient profile. Off-label uses are noted; clinician "
+        "judgment and shared decision-making apply.",
+        styles["small"],
+    ))
     targets = narrative.get("intervention_targets") or \
               _physician_static_targets(contributions)
     for i, t in enumerate(targets, start=1):
         if isinstance(t, str):
-            target, rationale, approach = t, "", ""
+            target, rationale, approach, lrx = t, "", "", ""
         else:
-            target = t.get("target", "")
+            target    = t.get("target", "")
             rationale = t.get("rationale", "")
-            approach = t.get("approach", "")
+            approach  = t.get("approach", "")
+            lrx       = t.get("longevity_rx", "")
         flow.append(Paragraph(
             f"<font color='#0D1B3E'><b>{i}.&nbsp;&nbsp;{target}</b></font>",
             styles["body"],
@@ -1025,7 +1327,13 @@ def build_physician_report(
         if approach:
             flow.append(Paragraph(
                 f"<b>Approach:</b> {approach}", styles["body"]))
-        flow.append(Spacer(1, 0.05 * inch))
+        if lrx:
+            flow.append(Paragraph(
+                f"<b><font color='#C9941A'>Longevity Rx to consider:</font></b> "
+                f"{lrx}",
+                styles["body"],
+            ))
+        flow.append(Spacer(1, 0.08 * inch))
 
     # ----- Follow-up -----
     follow = narrative.get("follow_up")
@@ -1036,25 +1344,40 @@ def build_physician_report(
     # ----- Lab reference table -----
     flow.append(PageBreak())
     flow.append(Paragraph("Lab Values - Reference Table", styles["h1"]))
+    flow.append(Paragraph(
+        "Values tinted "
+        "<font color='#155724'><b>green</b></font> are within typical range, "
+        "<font color='#856404'><b>yellow</b></font> borderline, "
+        "<font color='#721C24'><b>red</b></font> outside the typical range.",
+        styles["small"],
+    ))
+    pat_sex = patient.get("sex", "Male")
     lab_rows = []
+    statuses = []
     for key, meta in LAB_METADATA.items():
         val = labs.get(key)
         if val is None:
             continue
         try:
-            val_str = f"{float(val):.2f}"
+            val_f = float(val)
+            val_str = f"{val_f:.2f}"
+            status = _classify_lab(key, val_f, pat_sex)
         except (TypeError, ValueError):
             val_str = str(val)
+            status = "neutral"
         lab_rows.append([
             f"<b>{meta['label']}</b>",
             val_str,
             meta["units"],
             meta["ref_range"],
         ])
+        statuses.append(status)
     if lab_rows:
-        flow.append(_data_table(
-            ["Marker", "Value", "Units", "Typical range"],
-            lab_rows,
+        flow.append(_status_lab_table(
+            headers=["Marker", "Value", "Units", "Typical range"],
+            rows=lab_rows,
+            statuses=statuses,
+            value_col_idx=1,
             col_widths=[USABLE_W * 0.32, USABLE_W * 0.18,
                           USABLE_W * 0.20, USABLE_W * 0.30],
             styles=styles,
