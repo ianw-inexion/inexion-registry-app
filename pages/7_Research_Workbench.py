@@ -224,7 +224,7 @@ CLINIC_VARS = {
     'visit_number':                 'Visit number (1, 2, 3, ...)',
     'age_at_visit':                 'Age at this visit (years)',
     'age_baseline':                 'Age at first visit (years)',
-    'sex':                          'Sex',
+    'sex':                          'Sex (1=M, 2=F)',
     'source_clinic':                'Source clinic',
     # Biological-age clocks
     'phenoage':                     'PhenoAge (Levine 2018, years)',
