@@ -68,6 +68,13 @@ NSHAP_CODEBOOK_PARQUET = _dp("nshap_codebook.parquet")
 GEO_CATALOG_PARQUET    = _dp("geo/catalog_summary.parquet")
 GEO_DATASET_DIR        = _dp("geo")  # holds <accession>/{metadata,expression,series_info}
 GEO_PANEL_PARQUET      = _dp("geo_aging_panel.parquet")  # 50-gene aging panel pooled across RNA-seq cohorts
+
+# Clinic-data layer - Healthspan-style longitudinal patient registries
+CLINIC_PATIENTS_PARQUET      = _dp("clinic/clinic_patients.parquet")
+CLINIC_VISITS_PARQUET        = _dp("clinic/clinic_visits.parquet")
+CLINIC_INTERVENTIONS_PARQUET = _dp("clinic/clinic_interventions.parquet")
+CLINIC_NOTES_PARQUET         = _dp("clinic/clinic_notes.parquet")
+CLINIC_CLOCKS_PARQUET        = _dp("clinic/clinic_clocks.parquet")
 HEADLINE_DIR         = _dp("headline_analyses")
 ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
 ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")

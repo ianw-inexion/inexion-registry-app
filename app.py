@@ -160,6 +160,9 @@ _PAGES = {
                  icon=":material/home:", default=True),
     ],
     "Cohort Explorers": [
+        st.Page("pages/3e_Clinic_Explorer.py",
+                 title="Clinic Explorer",
+                 icon=":material/local_hospital:"),
         st.Page("pages/1_NHANES_Explorer.py",
                  title="NHANES Explorer",
                  icon=":material/biotech:"),
