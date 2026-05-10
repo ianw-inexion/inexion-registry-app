@@ -67,6 +67,7 @@ NSHAP_CODEBOOK_PARQUET = _dp("nshap_codebook.parquet")
 # GEO molecular-aging reference catalog (15 curated transcriptomics datasets)
 GEO_CATALOG_PARQUET    = _dp("geo/catalog_summary.parquet")
 GEO_DATASET_DIR        = _dp("geo")  # holds <accession>/{metadata,expression,series_info}
+GEO_PANEL_PARQUET      = _dp("geo_aging_panel.parquet")  # 50-gene aging panel pooled across RNA-seq cohorts
 HEADLINE_DIR         = _dp("headline_analyses")
 ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
 ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")

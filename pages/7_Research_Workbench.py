@@ -23,7 +23,8 @@ from src.config import (data_exists, NAVY, GOLD, CORAL, TEAL,
                         NHANES_PARQUET, HRS_VBS_PARQUET, HRS_PUBLIC_PARQUET,
                         HRS_DBS_PARQUET, NHANES_MORTALITY_PARQUET,
                         MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
-                        NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET)
+                        NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET,
+                        GEO_PANEL_PARQUET)
 
 st.set_page_config(page_title="Research Workbench - INEXION Registry", layout="wide")
 
@@ -321,11 +322,90 @@ def load_nshap():
     return bio
 
 
-nhanes = load_nhanes()
-hrs    = load_hrs_vbs()
-dbs    = load_dbs()
-midus  = load_midus()
-nshap  = load_nshap()
+@st.cache_data
+def load_geo_panel():
+    """Pooled-cohort RNA-seq aging panel: rows = samples, cols = (sample_gsm,
+    dataset, age, sex, tissue) + 50 z-scored aging gene columns."""
+    if not data_exists(GEO_PANEL_PARQUET):
+        return pd.DataFrame()
+    return pd.read_parquet(GEO_PANEL_PARQUET)
+
+
+# Variable dictionary for the GEO Aging Gene Panel. Entries beyond the
+# (age, sex, tissue, dataset) basics are gene symbols whose values are
+# z-scored log1p expression within each cohort.
+GEO_PANEL_VARS = {
+    "age":     "Chronological age (years)",
+    "sex":     "Sex",
+    "tissue":  "Source tissue",
+    "dataset": "Source GEO accession (random-effect grouping for mixed models)",
+    # Senescence / SASP
+    "CDKN2A":   "CDKN2A / p16 (senescence master regulator)",
+    "CDKN1A":   "CDKN1A / p21 (p53 effector, cell-cycle arrest)",
+    "GLB1":     "GLB1 / β-galactosidase (senescence marker)",
+    "MMP3":     "MMP3 (SASP collagenase)",
+    "MMP9":     "MMP9 (SASP gelatinase)",
+    "GDF15":    "GDF15 (stress-response cytokine)",
+    "SERPINE1": "SERPINE1 / PAI-1 (SASP)",
+    "IL6":      "IL6 (SASP cytokine)",
+    "IL1B":     "IL1B (SASP cytokine)",
+    "TNF":      "TNF (SASP cytokine)",
+    # NF-κB / inflammation
+    "NFKB1":    "NFKB1 (NF-κB p50 subunit)",
+    "NFKB2":    "NFKB2 (NF-κB p52 subunit)",
+    "RELA":     "RELA (NF-κB p65 subunit)",
+    "CCL2":     "CCL2 / MCP-1 (chemokine)",
+    "CXCL8":    "CXCL8 / IL-8 (chemokine)",
+    "NLRP3":    "NLRP3 (inflammasome)",
+    "PTGS2":    "PTGS2 / COX-2 (inflammation)",
+    "CRP":      "CRP (inflammation marker)",
+    # Longevity / IGF axis
+    "FOXO3":    "FOXO3 (longevity-associated TF)",
+    "IGF1":     "IGF1 (insulin-like growth factor 1)",
+    "IGF1R":    "IGF1R (IGF-1 receptor)",
+    "TERT":     "TERT (telomerase reverse transcriptase)",
+    "SIRT1":    "SIRT1 (NAD+-dependent deacetylase)",
+    "SIRT3":    "SIRT3 (mitochondrial sirtuin)",
+    # Mitochondrial / oxidative stress
+    "PPARGC1A": "PPARGC1A / PGC-1α (mitochondrial biogenesis)",
+    "TFAM":     "TFAM (mtDNA transcription factor)",
+    "NRF1":     "NRF1 (mitochondrial transcription)",
+    "SOD1":     "SOD1 (cytoplasmic superoxide dismutase)",
+    "SOD2":     "SOD2 (mitochondrial superoxide dismutase)",
+    "CAT":      "CAT (catalase)",
+    # Muscle / structural
+    "LMNA":     "LMNA (lamin A; premature-aging gene)",
+    "FBXO32":   "FBXO32 / Atrogin-1 (muscle atrophy)",
+    "TRIM63":   "TRIM63 / MuRF1 (muscle atrophy)",
+    "MSTN":     "MSTN / myostatin",
+    "MYH7":     "MYH7 (slow muscle fiber)",
+    "MYH2":     "MYH2 (fast muscle fiber)",
+    # DNA damage / repair
+    "TP53":     "TP53 (tumor suppressor)",
+    "ATM":      "ATM (DNA damage kinase)",
+    "BRCA1":    "BRCA1 (DNA repair)",
+    "MDM2":     "MDM2 (TP53 negative regulator)",
+    "CDKN2B":   "CDKN2B / p15 (cell cycle inhibitor)",
+    # Telomere / proliferation
+    "TERF1":    "TERF1 (telomere binding)",
+    "TERF2":    "TERF2 (telomere binding)",
+    "RB1":      "RB1 (retinoblastoma; cell cycle)",
+    "CCND1":    "CCND1 (cyclin D1)",
+    # Autophagy / proteostasis
+    "ATG7":     "ATG7 (autophagy initiation)",
+    "MAP1LC3B": "MAP1LC3B / LC3B (autophagosome marker)",
+    "BECN1":    "BECN1 / Beclin-1 (autophagy)",
+    "MTOR":     "MTOR (mTOR kinase)",
+    "SQSTM1":   "SQSTM1 / p62 (autophagy adapter)",
+}
+
+
+nhanes    = load_nhanes()
+hrs       = load_hrs_vbs()
+dbs       = load_dbs()
+midus     = load_midus()
+nshap     = load_nshap()
+geo_panel = load_geo_panel()
 
 if "wb_log" not in st.session_state:
     st.session_state["wb_log"] = []
@@ -676,13 +756,17 @@ with col_left:
         ["NHANES 2001-2018", "HRS 2016 (VBS + Survey)",
          "HRS DBS Longitudinal (2006-2016)",
          "MIDUS (M2 + R1 + M3, 2004-2022)",
-         "NSHAP (R1 + R2 + R3, 2005-2016)"],
+         "NSHAP (R1 + R2 + R3, 2005-2016)",
+         "GEO Aging Gene Panel (pooled RNA-seq, 5 cohorts)"],
         help=(
-            "Biomarker cohorts (samples × variables shape). The GEO molecular-"
-            "aging reference catalog (15 transcriptomics datasets, samples × "
-            "genes shape) lives in the GEO Explorer and Pathway Decomposition "
-            "pages instead - the data shape doesn't fit this workbench's "
-            "biomarker model."
+            "Biomarker cohorts have one row per (subject, wave) with named "
+            "biomarker variables. The GEO Aging Gene Panel pools samples from "
+            "5 RNA-seq cohorts with one row per sample and 50 z-scored "
+            "aging-related gene columns. For pooled GEO analyses, mixed-effects "
+            "with `dataset` as random intercept is the recommended model "
+            "(handles tissue / technology / cohort heterogeneity). The full "
+            "15-dataset GEO catalog lives in the GEO Explorer + Pathway "
+            "Decomposition pages."
         ),
     )
     if dataset.startswith("NHANES"):
@@ -697,6 +781,18 @@ with col_left:
     elif dataset.startswith("HRS"):
         df = hrs
         var_dict = {**HRS_VARS, **HRS_SURVEY_VARS}
+    elif dataset.startswith("GEO"):
+        df = geo_panel
+        var_dict = {**GEO_PANEL_VARS}
+        if not df.empty:
+            st.caption(
+                f"**{len(df)} samples** across "
+                f"{df['dataset'].nunique()} GEO RNA-seq cohorts. "
+                "Expression values are z-scored log1p counts within each "
+                "cohort. **Recommended model:** Mixed-effects with `dataset` "
+                "as random intercept to absorb cross-cohort confounding "
+                "(different tissues, technologies, sample-prep protocols)."
+            )
     else:
         df = midus
         var_dict = {**MIDUS_VARS}
