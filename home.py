@@ -13,6 +13,8 @@ from src.config import (data_exists,
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
     NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET,
     GEO_CATALOG_PARQUET,
+    CLINIC_PATIENTS_PARQUET, CLINIC_VISITS_PARQUET,
+    CLINIC_INTERVENTIONS_PARQUET,
 )
 
 st.markdown(
@@ -78,6 +80,29 @@ def get_registry_stats():
         except Exception:
             pass
 
+    # INEXION clinic layer (first-party longitudinal patient registry)
+    if data_exists(CLINIC_PATIENTS_PARQUET):
+        try:
+            cp = pd.read_parquet(CLINIC_PATIENTS_PARQUET,
+                                  columns=['registry_patient_id'])
+            stats['clinic_patients'] = len(cp)
+        except Exception:
+            pass
+    if data_exists(CLINIC_VISITS_PARQUET):
+        try:
+            cv = pd.read_parquet(CLINIC_VISITS_PARQUET,
+                                  columns=['registry_patient_id'])
+            stats['clinic_visits'] = len(cv)
+        except Exception:
+            pass
+    if data_exists(CLINIC_INTERVENTIONS_PARQUET):
+        try:
+            ci = pd.read_parquet(CLINIC_INTERVENTIONS_PARQUET,
+                                  columns=['registry_patient_id'])
+            stats['clinic_interventions'] = len(ci)
+        except Exception:
+            pass
+
     stats['total_observations'] = (
         stats.get('nhanes_n', 0) +
         stats.get('hrs_vbs_n', 0) +
@@ -86,11 +111,13 @@ def get_registry_stats():
         stats.get('hrs_poa_n', 0) +
         stats.get('midus_bio_n', 0) +
         stats.get('nshap_bio_n', 0) +
-        stats.get('geo_samples', 0)
+        stats.get('geo_samples', 0) +
+        stats.get('clinic_visits', 0)
     )
     stats['datasets_loaded'] = sum(
         1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n',
-                    'midus_bio_n','nshap_bio_n','geo_datasets']
+                    'midus_bio_n','nshap_bio_n','geo_datasets',
+                    'clinic_patients']
         if k in stats
     )
     return stats
@@ -108,7 +135,7 @@ try:
     c6.metric("HRS DunedinPACE", f"{s.get('hrs_poa_n',0):,}")
     c7.metric("MIDUS biomarker", f"{s.get('midus_bio_n',0):,}")
     c8.metric("NSHAP biomarker", f"{s.get('nshap_bio_n',0):,}")
-    c9, c10, c11, _ = st.columns(4)
+    c9, c10, c11, c12 = st.columns(4)
     c9.metric(
         "GEO catalog datasets",
         f"{s.get('geo_datasets', 0)} / 15",
@@ -124,6 +151,29 @@ try:
         f"{s.get('geo_with_expr', 0)} / {s.get('geo_datasets', 0)}",
         help="Datasets with analysis-ready expression matrices on disk.",
     )
+    c12.metric(
+        "INEXION clinic patients",
+        f"{s.get('clinic_patients', 0):,}",
+        help=(
+            "First-party longitudinal patient registry. Synthetic seed "
+            "today; Healthspan + partner clinic bundles land here."
+        ),
+    )
+    c13, c14, _, _ = st.columns(4)
+    c13.metric(
+        "Clinic visits",
+        f"{s.get('clinic_visits', 0):,}",
+        help="Total visit-level observations across all clinic patients.",
+    )
+    c14.metric(
+        "Clinic intervention rows",
+        f"{s.get('clinic_interventions', 0):,}",
+        help=(
+            "Active intervention records, harmonized to a 44-entry "
+            "longevity taxonomy (16 therapeutic classes, ATC codes "
+            "where standardized)."
+        ),
+    )
 except Exception as e:
     st.warning(f"Could not load registry stats: {e}")
 
@@ -135,6 +185,19 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown(
         f"""
+        <div style='background:#F2F4F8;border-left:4px solid {GOLD};
+                    padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>
+                INEXION Clinic Layer <span style='color:{GOLD};
+                font-size:11px;font-weight:600;letter-spacing:1px;
+                text-transform:uppercase;margin-left:6px;'>First-party</span>
+            </div>
+            <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
+                10,000 patients - ~4.5 visits/patient - 70-marker lab panel - PhenoAge + Liver + Kidney clocks per visit<br>
+                Intervention harmonization across a 44-entry longevity taxonomy (NAD pathway, mTOR modulation, senolytic, peptide therapy, hormone replacement) with ATC codes and INEXION namespace fallback.<br>
+                <strong>Status:</strong> synthetic seed deployed; Healthspan + partner clinic bundles absorb cleanly via the same pipeline.
+            </div>
+        </div>
         <div style='background:#F2F4F8;border-left:4px solid {NAVY};
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>NHANES 2001-2018</div>
@@ -238,6 +301,12 @@ st.markdown("### What you can do")
 left, right = st.columns(2)
 with left:
     st.markdown(
+        "**Clinic Explorer** - INEXION's first-party longitudinal registry. "
+        "Cohort filter (source clinic, sex, age, on-intervention) + 5 tabs: "
+        "Cohort Overview, Lab Distributions across the 70-marker panel, "
+        "Interventions grouped by therapeutic / mechanism / category / individual "
+        "with code-coverage panel, Biological-Age Clocks (PhenoAge δ + Liver "
+        "+ Kidney), and Per-Patient Drill-In (trajectory + intervention timeline).\n\n"
         "**NHANES Explorer** - filter the 44,898-person NHANES cohort by age, sex, "
         "race, BMI, and biomarker values. See live counts, descriptive summaries, "
         "cycle trends, and export cohort slices as CSV.\n\n"

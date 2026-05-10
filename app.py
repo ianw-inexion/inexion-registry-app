@@ -40,6 +40,82 @@ if os.path.exists(_LOGO_PATH):
 
 
 # ---------------------------------------------------------------------------
+# Navigation - declared EARLY (before any custom HTML / CSS / JS renders)
+# so Streamlit's automatic pages/ folder discovery is suppressed cleanly.
+# Putting st.markdown for CSS before st.navigation() can in some Streamlit
+# versions trigger the fallback page list to appear alongside the grouped
+# nav. We use only the required positional arg (position/expanded are
+# newer kwargs and may not exist in the deployed Streamlit version).
+# ---------------------------------------------------------------------------
+_PAGES = {
+    "Dashboard": [
+        st.Page("home.py", title="Registry Stats",
+                 icon=":material/home:", default=True),
+    ],
+    "Cohort Explorers": [
+        st.Page("pages/3e_Clinic_Explorer.py",
+                 title="Clinic Explorer",
+                 icon=":material/local_hospital:"),
+        st.Page("pages/1_NHANES_Explorer.py",
+                 title="NHANES Explorer",
+                 icon=":material/biotech:"),
+        st.Page("pages/2_HRS_Explorer.py",
+                 title="HRS Explorer",
+                 icon=":material/biotech:"),
+        st.Page("pages/3_MIDUS_Explorer.py",
+                 title="MIDUS Explorer",
+                 icon=":material/biotech:"),
+        st.Page("pages/3c_NSHAP_Explorer.py",
+                 title="NSHAP Explorer",
+                 icon=":material/biotech:"),
+        st.Page("pages/3d_GEO_Explorer.py",
+                 title="GEO Explorer",
+                 icon=":material/genetics:"),
+        st.Page("pages/3_Market_Intelligence.py",
+                 title="Market Intelligence",
+                 icon=":material/explore:"),
+    ],
+    "Patient Tools": [
+        st.Page("pages/4_Patient_Analysis.py",
+                 title="Patient Analysis",
+                 icon=":material/person:"),
+    ],
+    "Clocks & Validation": [
+        st.Page("pages/5_Validation.py",
+                 title="Validation Dashboard",
+                 icon=":material/check_circle:"),
+        st.Page("pages/6_Organ_Ages.py",
+                 title="Organ Ages",
+                 icon=":material/favorite:"),
+        st.Page("pages/6b_Methylation_Clocks.py",
+                 title="Methylation Clocks",
+                 icon=":material/genetics:"),
+        st.Page("pages/6c_Pathway_Decomposition.py",
+                 title="Pathway Decomposition",
+                 icon=":material/network_intel_node:"),
+    ],
+    "Research": [
+        st.Page("pages/7_Research_Workbench.py",
+                 title="Research Workbench",
+                 icon=":material/science:"),
+    ],
+    "Reference & Admin": [
+        st.Page("pages/8_Dataset_Catalog.py",
+                 title="Dataset Catalog",
+                 icon=":material/folder:"),
+        st.Page("pages/9_Variable_Dictionary.py",
+                 title="Variable Dictionary",
+                 icon=":material/menu_book:"),
+        st.Page("pages/10_Admin.py",
+                 title="Admin",
+                 icon=":material/admin_panel_settings:"),
+    ],
+}
+
+pg = st.navigation(_PAGES)
+
+
+# ---------------------------------------------------------------------------
 # Custom CSS - logo enlargement + section headers (UPPERCASE, BOLD, larger,
 # tinted bg) + hover effects + active-state fix.
 #
@@ -150,77 +226,6 @@ st.markdown(
 
 
 # ---------------------------------------------------------------------------
-# Navigation - grouped pages with friendly labels.
-# "Dashboard" group label avoids the visual duplication that "Home" group
-# label would cause (since the page inside is also "Home").
-# ---------------------------------------------------------------------------
-_PAGES = {
-    "Dashboard": [
-        st.Page("home.py", title="Registry Stats",
-                 icon=":material/home:", default=True),
-    ],
-    "Cohort Explorers": [
-        st.Page("pages/3e_Clinic_Explorer.py",
-                 title="Clinic Explorer",
-                 icon=":material/local_hospital:"),
-        st.Page("pages/1_NHANES_Explorer.py",
-                 title="NHANES Explorer",
-                 icon=":material/biotech:"),
-        st.Page("pages/2_HRS_Explorer.py",
-                 title="HRS Explorer",
-                 icon=":material/biotech:"),
-        st.Page("pages/3_MIDUS_Explorer.py",
-                 title="MIDUS Explorer",
-                 icon=":material/biotech:"),
-        st.Page("pages/3c_NSHAP_Explorer.py",
-                 title="NSHAP Explorer",
-                 icon=":material/biotech:"),
-        st.Page("pages/3d_GEO_Explorer.py",
-                 title="GEO Explorer",
-                 icon=":material/genetics:"),
-        st.Page("pages/3_Market_Intelligence.py",
-                 title="Market Intelligence",
-                 icon=":material/explore:"),
-    ],
-    "Patient Tools": [
-        st.Page("pages/4_Patient_Analysis.py",
-                 title="Patient Analysis",
-                 icon=":material/person:"),
-    ],
-    "Clocks & Validation": [
-        st.Page("pages/5_Validation.py",
-                 title="Validation Dashboard",
-                 icon=":material/check_circle:"),
-        st.Page("pages/6_Organ_Ages.py",
-                 title="Organ Ages",
-                 icon=":material/favorite:"),
-        st.Page("pages/6b_Methylation_Clocks.py",
-                 title="Methylation Clocks",
-                 icon=":material/genetics:"),
-        st.Page("pages/6c_Pathway_Decomposition.py",
-                 title="Pathway Decomposition",
-                 icon=":material/network_intel_node:"),
-    ],
-    "Research": [
-        st.Page("pages/7_Research_Workbench.py",
-                 title="Research Workbench",
-                 icon=":material/science:"),
-    ],
-    "Reference & Admin": [
-        st.Page("pages/8_Dataset_Catalog.py",
-                 title="Dataset Catalog",
-                 icon=":material/folder:"),
-        st.Page("pages/9_Variable_Dictionary.py",
-                 title="Variable Dictionary",
-                 icon=":material/menu_book:"),
-        st.Page("pages/10_Admin.py",
-                 title="Admin",
-                 icon=":material/admin_panel_settings:"),
-    ],
-}
-
-pg = st.navigation(_PAGES, position="sidebar", expanded=True)
-
 # JS - tag every section-header element with .inexion-section-header.
 # Detection is behavioral: an element is a section header iff it has
 # cursor:pointer AND contains no <a> descendant AND isn't inside an <a>.

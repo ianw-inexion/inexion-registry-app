@@ -87,6 +87,33 @@ APP_VERSION = "0.3.0-prototype"
 # Dataset catalog
 DATASETS = [
     {
+        "id": "inexion_clinic",
+        "name": "INEXION Clinic Layer (synthetic_10k)",
+        "source": "INEXION-operated longevity clinics (first-party)",
+        "status": "Available - synthetic seed",
+        "access": "Internal / partner clinics (HIPAA-de-identified)",
+        "participants": 10000,
+        "cycles": None,
+        "cycle_range": "Longitudinal, ~4.5 visits/patient",
+        "description": (
+            "INEXION's first-party longitudinal clinic registry. Each clinic "
+            "submits a 4-CSV bundle (patients, lab results, interventions, "
+            "physician notes) and the pipeline produces five harmonized "
+            "parquets: clinic_patients, clinic_visits (70-marker lab panel), "
+            "clinic_interventions (mapped against a 44-entry INEXION "
+            "taxonomy with therapeutic class, mechanism class, ATC code, "
+            "and INEXION namespace code), clinic_notes (PII-scrubbed), and "
+            "clinic_clocks (PhenoAge, Liver Age, Kidney Age per visit, "
+            "plus baseline-anchored trajectory deltas). De-identification: "
+            "SHA256 patient-ID hashing + per-patient deterministic date "
+            "shift (±90 days) preserves intervals while breaking "
+            "calendar linkage. Current seed is a synthetic 10K-patient "
+            "cohort; the same pipeline absorbs real Healthspan data "
+            "when it lands."
+        ),
+        "path": CLINIC_PATIENTS_PARQUET,
+    },
+    {
         "id": "nhanes",
         "name": "NHANES 2001-2018",
         "source": "CDC National Health and Nutrition Examination Survey",

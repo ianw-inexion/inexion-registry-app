@@ -9,10 +9,18 @@ st.title("Variable Dictionary")
 st.caption("Every variable in the NHANES harmonized dataset — units, definitions, grouping.")
 st.info(
     "**This dictionary covers the biomarker / phenotype layer** (NHANES, HRS, "
-    "MIDUS, NSHAP). The GEO molecular-aging reference catalog uses a different "
-    "schema — gene/probe IDs as feature columns, not named biomarker fields — "
-    "so its variables are surfaced inside the **GEO Explorer** page instead, "
-    "with per-dataset metadata tables and expression-matrix previews."
+    "MIDUS, NSHAP). Two registry layers use their own schemas and are "
+    "documented elsewhere:\n\n"
+    "- The **GEO molecular-aging reference catalog** uses gene/probe IDs as "
+    "feature columns (not named biomarker fields). Its variables are surfaced "
+    "inside the **GEO Explorer** page, with per-dataset metadata tables and "
+    "expression-matrix previews.\n\n"
+    "- The **INEXION clinic layer** uses a ~70-column longitudinal lab panel "
+    "(CBC + CMP + lipids + hormones + inflammation + iron + LD isoenzymes) "
+    "plus an intervention taxonomy with therapeutic class, mechanism class, "
+    "molecular target, and ATC/INEXION codes per intervention. These are "
+    "surfaced inside the **Clinic Explorer** page (Lab Distributions tab + "
+    "Interventions tab + per-patient drill-in)."
 )
 
 # Search
