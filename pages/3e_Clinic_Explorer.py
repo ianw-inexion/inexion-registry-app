@@ -343,42 +343,133 @@ with tabs[2]:
     if filtered_int.empty:
         st.info("No interventions in the filtered cohort.")
     else:
-        st.markdown("#### Intervention Prevalence")
         active = filtered_int[
             filtered_int["status"].astype(str).str.lower() == "active"
         ]
+
+        # Detect whether harmonized columns are present (set by Phase D
+        # pipeline). Falls back gracefully to the legacy view when the
+        # parquet hasn't been rebuilt yet.
+        _harm_cols = ["therapeutic_class", "mechanism_class",
+                      "atc_code", "rxnorm_cui", "snomed_id", "inexion_code"]
+        _has_taxonomy = all(c in active.columns for c in _harm_cols[:2])
+
+        # ---- Grouping selector ----
+        if _has_taxonomy:
+            group_label_map = {
+                "Therapeutic class (broad)": "therapeutic_class",
+                "Mechanism class (specific)": "mechanism_class",
+                "Raw clinic category":         "category",
+                "Individual intervention":     "intervention",
+            }
+            choice = st.radio(
+                "Group by",
+                list(group_label_map.keys()),
+                horizontal=True,
+                key="int_group_by",
+            )
+            group_col = group_label_map[choice]
+        else:
+            st.warning(
+                "Intervention taxonomy not yet present in the parquet. "
+                "Re-run `build_clinic_parquet.py` to harmonize interventions "
+                "against the INEXION taxonomy (therapeutic_class, "
+                "mechanism_class, ATC codes, etc.)."
+            )
+            group_col = "intervention"
+
+        # ---- Prevalence bar (current grouping) ----
+        st.markdown(f"#### Prevalence by {group_col.replace('_', ' ')}")
         prev = (
-            active.groupby("intervention")["registry_patient_id"]
+            active.groupby(group_col)["registry_patient_id"]
                   .nunique().sort_values(ascending=True)
         )
         if len(prev):
-            top = prev.tail(25)
+            top = prev.tail(30)
             fig = px.bar(
                 x=top.values, y=top.index, orientation="h",
                 color_discrete_sequence=[GOLD],
             )
             fig.update_layout(
-                title=f"Active interventions - top {len(top)} by patient count",
+                title=(f"Active interventions by {group_col.replace('_', ' ')}"
+                         f" - {len(top)} groups"),
                 height=560, plot_bgcolor="white",
                 xaxis_title="Patients (active)", yaxis_title="",
-                margin=dict(l=200),
+                margin=dict(l=240),
             )
             st.plotly_chart(fig, use_container_width=True, key="int_prev")
 
-        st.markdown("#### By Category")
-        if "category" in active.columns:
-            cat = active.groupby("category")["registry_patient_id"].nunique() \
-                        .reset_index(name="patients").sort_values("patients",
-                                                                   ascending=False)
-            fig = px.bar(
-                cat, x="patients", y="category", orientation="h",
-                color_discrete_sequence=[NAVY],
+        # ---- Drill-in: when grouped by therapeutic class, show
+        #      mechanism breakdown within selected class.
+        if _has_taxonomy and group_col == "therapeutic_class":
+            st.markdown("#### Mechanism breakdown within therapeutic class")
+            classes = sorted(active["therapeutic_class"].dropna().unique())
+            if classes:
+                sel = st.selectbox(
+                    "Therapeutic class",
+                    classes,
+                    key="int_class_drill",
+                )
+                sub = active[active["therapeutic_class"] == sel]
+                mech_prev = (
+                    sub.groupby("mechanism_class")["registry_patient_id"]
+                       .nunique().sort_values(ascending=True)
+                )
+                if len(mech_prev):
+                    fig = px.bar(
+                        x=mech_prev.values, y=mech_prev.index, orientation="h",
+                        color_discrete_sequence=[TEAL],
+                    )
+                    fig.update_layout(
+                        title=f"{sel} - mechanisms by patient count",
+                        height=max(240, 40 * len(mech_prev) + 100),
+                        plot_bgcolor="white",
+                        xaxis_title="Patients (active)", yaxis_title="",
+                        margin=dict(l=240),
+                    )
+                    st.plotly_chart(fig, use_container_width=True,
+                                       key="int_mech_drill")
+
+                # Member interventions in this class
+                members = (
+                    sub.groupby("intervention")["registry_patient_id"]
+                       .nunique().sort_values(ascending=False)
+                       .reset_index()
+                       .rename(columns={"registry_patient_id": "patients"})
+                )
+                st.dataframe(
+                    members, use_container_width=True, hide_index=True,
+                )
+
+        # ---- Code coverage panel ----
+        if _has_taxonomy:
+            st.markdown("#### Standard-code coverage")
+            n_rows = len(active)
+            cov_rows = []
+            for col, label in [
+                ("atc_code",    "WHO ATC"),
+                ("rxnorm_cui",  "NIH RxNorm CUI"),
+                ("snomed_id",   "SNOMED CT"),
+                ("inexion_code", "INEXION namespace"),
+            ]:
+                if col in active.columns:
+                    n_nn = active[col].notna().sum()
+                    pct  = (100.0 * n_nn / n_rows) if n_rows else 0.0
+                    cov_rows.append({
+                        "Code system":          label,
+                        "Intervention rows":    f"{n_nn:,}",
+                        "% of active rows":     f"{pct:.1f}%",
+                    })
+            if cov_rows:
+                st.dataframe(
+                    pd.DataFrame(cov_rows),
+                    use_container_width=True, hide_index=True,
+                )
+            st.caption(
+                "RxNorm / SNOMED are stubbed to null in v1 of the "
+                "taxonomy; backfill via RxNav API is a future ticket. "
+                "INEXION namespace codes are always populated."
             )
-            fig.update_layout(
-                title="Active interventions by category", height=400,
-                plot_bgcolor="white",
-            )
-            st.plotly_chart(fig, use_container_width=True, key="int_cat")
 
 
 # =========================================================================
