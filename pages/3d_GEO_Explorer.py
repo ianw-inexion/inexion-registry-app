@@ -206,6 +206,41 @@ if cat_row.inexion_relevance:
         unsafe_allow_html=True,
     )
 
+# ALLEN_ATLAS-specific statistical caveat. Allen rows are (subject x cell_type)
+# pseudo-bulks - each subject contributes ~15 rows across cell types - so any
+# downstream regression must treat subject as a grouping variable to avoid
+# double-counting. Flagging this prominently on the Explorer page so users
+# don't naively pool the 1,573 rows in an OLS as if they were independent.
+if acc_choice == "ALLEN_ATLAS":
+    st.markdown(
+        f"""
+        <div style='background:rgba(46,139,139,0.08);border-left:4px solid {TEAL};
+                    padding:12px 18px;border-radius:4px;margin:12px 0;
+                    font-size:13px;line-height:1.55;'>
+        <b style='color:{NAVY};'>Statistical caveat — Allen pseudobulks have a
+        nested structure.</b><br/>
+        Each row is one <code>(subject × cell_type)</code> pseudo-bulk, not one
+        independent sample. The 1,573 rows come from <b>108 subjects × ~20 cell
+        types</b>, so any single subject contributes roughly 15 rows. Treating
+        these as independent observations in an OLS or correlation will inflate
+        sample size and shrink p-values artificially.
+        <br/><br/>
+        <b style='color:{NAVY};'>Recommended models:</b>
+        <ul style='margin:6px 0 6px 18px;'>
+          <li>Mixed-effects with <code>subject</code> as random intercept —
+              absorbs within-subject correlation</li>
+          <li>Include <code>cell_type</code> as a categorical covariate (fixed
+              or random) to control for cell-type-specific expression baselines</li>
+          <li>Restrict analyses to one cell type at a time when looking at
+              per-cell-type aging signatures</li>
+        </ul>
+        Same shape applies to the Research Workbench when ALLEN_ATLAS lands there
+        — use mixed-effects, not OLS.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # Metric strip
 m1, m2, m3, m4 = st.columns(4)
 with m1:
