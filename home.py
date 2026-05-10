@@ -12,6 +12,7 @@ from src.config import (data_exists,
     HRS_EPIGEN_PARQUET, HRS_POA_PARQUET, HRS_PUBLIC_PARQUET,
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
     NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET,
+    GEO_CATALOG_PARQUET,
 )
 
 st.markdown(
@@ -67,6 +68,16 @@ def get_registry_stats():
         df = pd.read_parquet(NSHAP_BIO_PARQUET, columns=['nshap_id'])
         stats['nshap_bio_n'] = len(df)
 
+    # GEO molecular-aging reference catalog (15 transcriptomics datasets)
+    if data_exists(GEO_CATALOG_PARQUET):
+        try:
+            df = pd.read_parquet(GEO_CATALOG_PARQUET)
+            stats['geo_datasets']     = len(df)
+            stats['geo_samples']      = int(df['n_samples'].sum())
+            stats['geo_with_expr']    = int(df.get('has_expression', pd.Series(dtype=bool)).sum())
+        except Exception:
+            pass
+
     stats['total_observations'] = (
         stats.get('nhanes_n', 0) +
         stats.get('hrs_vbs_n', 0) +
@@ -74,11 +85,12 @@ def get_registry_stats():
         stats.get('hrs_epi_n', 0) +
         stats.get('hrs_poa_n', 0) +
         stats.get('midus_bio_n', 0) +
-        stats.get('nshap_bio_n', 0)
+        stats.get('nshap_bio_n', 0) +
+        stats.get('geo_samples', 0)
     )
     stats['datasets_loaded'] = sum(
         1 for k in ['nhanes_n','hrs_vbs_n','hrs_dbs_n','hrs_epi_n','hrs_poa_n',
-                    'midus_bio_n','nshap_bio_n']
+                    'midus_bio_n','nshap_bio_n','geo_datasets']
         if k in stats
     )
     return stats
@@ -96,6 +108,22 @@ try:
     c6.metric("HRS DunedinPACE", f"{s.get('hrs_poa_n',0):,}")
     c7.metric("MIDUS biomarker", f"{s.get('midus_bio_n',0):,}")
     c8.metric("NSHAP biomarker", f"{s.get('nshap_bio_n',0):,}")
+    c9, c10, c11, _ = st.columns(4)
+    c9.metric(
+        "GEO catalog datasets",
+        f"{s.get('geo_datasets', 0)} / 15",
+        help="Curated molecular-aging transcriptomics reference layer.",
+    )
+    c10.metric(
+        "GEO catalog samples",
+        f"{s.get('geo_samples', 0):,}",
+        help="Total samples across all loaded GEO accessions.",
+    )
+    c11.metric(
+        "GEO with expression",
+        f"{s.get('geo_with_expr', 0)} / {s.get('geo_datasets', 0)}",
+        help="Datasets with analysis-ready expression matrices on disk.",
+    )
 except Exception as e:
     st.warning(f"Could not load registry stats: {e}")
 
@@ -178,6 +206,19 @@ with col2:
                 Identifies where INEXION-aligned consumer demand is strongest (DC corridor, MA, NH, UT, CO).
             </div>
         </div>
+        <div style='background:#F2F4F8;border-left:4px solid {TEAL};
+                    padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
+            <div style='font-weight:700;color:{NAVY};font-size:16px;'>GEO Molecular Aging Reference</div>
+            <div style='color:#4A4A4A;font-size:14px;margin-top:6px;'>
+                15 curated transcriptomics datasets - ~2,500 samples - blood / muscle /
+                fibroblast / multi-tissue<br>
+                Covers blood-aging atlas (Allen Institute, n=1,120), metformin RCT
+                (GSE157585), transcriptomic clock training (GSE193141), CD8 senescence
+                (GSE310729), SASP signatures, intervention response. 12 of 15
+                accessions with analysis-ready expression matrices recoverable
+                (GEO suppl + Zenodo + Allen Atlas).
+            </div>
+        </div>
         <div style='background:#F2F4F8;border-left:4px solid #6B6B8D;
                     padding:16px 20px;border-radius:4px;margin-bottom:12px;'>
             <div style='font-weight:700;color:{NAVY};font-size:16px;'>Incoming</div>
@@ -208,7 +249,10 @@ with left:
         "Neuroendocrine, Wave Comparison, Cognition (M3 BTACT).\n\n"
         "**NSHAP Explorer** - 10,578 observations across 3 rounds (2005-2016). "
         "DBS biomarkers (R1+R2), in-home social network roster, sensory + functional "
-        "measures, MoCA cognition."
+        "measures, MoCA cognition.\n\n"
+        "**GEO Explorer** - the curated molecular-aging transcriptomics catalog. "
+        "Catalog overview + per-dataset drill-in: series info, sample metadata, "
+        "demographic distributions, expression matrix preview where available."
     )
 with right:
     st.markdown(
@@ -224,6 +268,9 @@ with right:
         "**Organ Ages + Methylation Clocks** - per-system biological-age clocks "
         "(Inflammation, Liver, Kidney, Metabolic) and the methylation v0 page surfacing "
         "GrimAge2 + DunedinPACE in HRS.\n\n"
+        "**Pathway Decomposition** - reproduces the GSE242202 muscle-aging "
+        "decomposition: primary aging vs chronic inflammation vs disuse / atrophy "
+        "scored from canonical gene panels and ranked by R² vs chronological age.\n\n"
         "**Research Workbench** - no-code hypothesis testing across NHANES, HRS, "
         "HRS DBS, MIDUS, and NSHAP. OLS, Cox PH, logistic, mixed-effects, and GAM "
         "with BH-FDR session log."

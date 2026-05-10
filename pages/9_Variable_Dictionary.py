@@ -7,6 +7,13 @@ from src.config import NAVY
 st.set_page_config(page_title="Variable Dictionary — INEXION Registry", layout="wide")
 st.title("Variable Dictionary")
 st.caption("Every variable in the NHANES harmonized dataset — units, definitions, grouping.")
+st.info(
+    "**This dictionary covers the biomarker / phenotype layer** (NHANES, HRS, "
+    "MIDUS, NSHAP). The GEO molecular-aging reference catalog uses a different "
+    "schema — gene/probe IDs as feature columns, not named biomarker fields — "
+    "so its variables are surfaced inside the **GEO Explorer** page instead, "
+    "with per-dataset metadata tables and expression-matrix previews."
+)
 
 # Search
 q = st.text_input("Search", placeholder="Type a variable name, unit, or keyword")

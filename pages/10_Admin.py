@@ -11,6 +11,7 @@ from src.config import (
     MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET, MIDUS_CODEBOOK_PARQUET,
     NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET, NSHAP_CODEBOOK_PARQUET,
     BRFSS_STATE_PARQUET, BRFSS_METRO_PARQUET,
+    GEO_CATALOG_PARQUET, GEO_DATASET_DIR,
     NHANES_MORTALITY_PARQUET, HRS_MORTALITY_PARQUET, MIDUS_MORTALITY_PARQUET,
     data_exists,
 )
@@ -72,6 +73,8 @@ ALL_FILES = [
     ("NSHAP variable codebook",              NSHAP_CODEBOOK_PARQUET,  "NSHAP"),
     ("BRFSS state market scores (2024)",     BRFSS_STATE_PARQUET,     "BRFSS"),
     ("BRFSS metro market scores (2024)",     BRFSS_METRO_PARQUET,     "BRFSS"),
+    ("GEO catalog summary (15 datasets)",    GEO_CATALOG_PARQUET,     "GEO"),
+    ("GEO per-dataset bundle directory",     GEO_DATASET_DIR,         "GEO"),
     ("Headline analyses directory",          HEADLINE_DIR,            "Analyses"),
 ]
 
@@ -179,6 +182,10 @@ status_items = [
     ("OK",      "NSHAP R1+R2+R3 ingested (public-use)","ICPSR 20541/34921/36873 via pyreadr - 10,578 stacked obs - biomarkers + social + R3 mortality"),
     ("Pending", "NSHAP R3 biomeasures release",      "Open ICPSR/NORC inquiry - DBS assays not present in 36873 public or restricted; brief drafted for Anant"),
     ("Pending", "NSHAP R4 (2021-23)",                "ICPSR 39511 - restricted-only, IRB pending"),
+    ("OK",      "GEO molecular reference catalog",   "15 curated transcriptomics datasets ingested - ~2,500 samples - blood + muscle + fibroblast + multi-tissue"),
+    ("OK",      "GEO expression layer",              "12 of 15 expression matrices recoverable: 9 GEO suppl + 1 Zenodo (GSE248822) + 2 Allen Atlas (GSE271896, GSE275067)"),
+    ("Pending", "GSE216842 expression",              "Email drafted to Yu Sun lab; per-sample _RAW.tar only on GEO"),
+    ("Pending", "GSE280110 + GSE226189 expression",  "_RAW.tar only on GEO; would require local re-alignment - low priority"),
     ("Pending", "AWS Glue catalog",                  "Pending Nirav - databases: inexion_raw / curated / analytics"),
     ("Pending", "Athena workgroups",                 "Pending Nirav - per-user spend limits"),
     ("Pending", "Auth (Google SSO + magic-link)",    "Pending - Supabase project + Railway deployment"),

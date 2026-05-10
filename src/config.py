@@ -64,6 +64,9 @@ MIDUS_CODEBOOK_PARQUET = _dp("midus_codebook.parquet")
 NSHAP_BIO_PARQUET      = _dp("nshap_biomarker.parquet")
 NSHAP_SOCIAL_PARQUET   = _dp("nshap_social.parquet")
 NSHAP_CODEBOOK_PARQUET = _dp("nshap_codebook.parquet")
+# GEO molecular-aging reference catalog (15 curated transcriptomics datasets)
+GEO_CATALOG_PARQUET    = _dp("geo/catalog_summary.parquet")
+GEO_DATASET_DIR        = _dp("geo")  # holds <accession>/{metadata,expression,series_info}
 HEADLINE_DIR         = _dp("headline_analyses")
 ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
 ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")
@@ -285,18 +288,26 @@ DATASETS = [
     {
         "id": "geo",
         "name": "GEO Molecular Aging Reference",
-        "source": "NCBI Gene Expression Omnibus",
-        "status": "P1 series ready to download",
+        "source": "NCBI GEO + Zenodo + Allen Institute Immune Atlas",
+        "status": "Available",
         "access": "Public",
         "participants": 2480,
-        "cycles": None,
+        "cycles": 15,
         "cycle_range": "Cross-sectional + intervention",
         "description": (
-            "15 curated transcriptomics datasets spanning blood immune aging, "
-            "senescence/SASP signatures, intervention response, and multi-tissue "
-            "atlases. Molecular reference layer for the INEXION multi-omic platform."
+            "15 curated transcriptomics datasets - the molecular reference layer "
+            "for the INEXION multi-omic platform. Includes blood immune aging "
+            "(Allen Human Immune Health Atlas, n=1,120), metformin RCT "
+            "(GSE157585), transcriptomic clock training (GSE193141), CD8 "
+            "senescence (GSE310729), multi-cell SASP signatures, intervention "
+            "response, and longitudinal fibroblast lifespan. 12 of 15 accessions "
+            "have analysis-ready expression matrices recoverable: 9 from GEO "
+            "supplementary, 1 from Zenodo (GSE248822), 2 from the Allen "
+            "Institute Immune Health Atlas (GSE271896, GSE275067). The "
+            "remaining 3 (24 + 33 + 82 samples) ship per-sample raw files "
+            "only and require either author outreach or local re-alignment."
         ),
-        "path": None,
+        "path": GEO_CATALOG_PARQUET,
     },
     {
         "id": "brfss",

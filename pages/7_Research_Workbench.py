@@ -677,6 +677,13 @@ with col_left:
          "HRS DBS Longitudinal (2006-2016)",
          "MIDUS (M2 + R1 + M3, 2004-2022)",
          "NSHAP (R1 + R2 + R3, 2005-2016)"],
+        help=(
+            "Biomarker cohorts (samples × variables shape). The GEO molecular-"
+            "aging reference catalog (15 transcriptomics datasets, samples × "
+            "genes shape) lives in the GEO Explorer and Pathway Decomposition "
+            "pages instead - the data shape doesn't fit this workbench's "
+            "biomarker model."
+        ),
     )
     if dataset.startswith("NHANES"):
         df = nhanes
