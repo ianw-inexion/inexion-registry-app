@@ -24,7 +24,8 @@ from src.config import (data_exists, NAVY, GOLD, CORAL, TEAL,
                         HRS_DBS_PARQUET, NHANES_MORTALITY_PARQUET,
                         MIDUS_BIO_PARQUET, MIDUS_COG_PARQUET,
                         NSHAP_BIO_PARQUET, NSHAP_SOCIAL_PARQUET,
-                        GEO_PANEL_PARQUET)
+                        GEO_PANEL_PARQUET,
+                        CLINIC_WORKBENCH_PARQUET)
 
 st.set_page_config(page_title="Research Workbench - INEXION Registry", layout="wide")
 
@@ -212,6 +213,79 @@ NSHAP_VARS = {
     'round':            'NSHAP round',
 }
 
+# INEXION Clinic Layer - first-party longitudinal patient registry.
+# One row per (patient, visit). registry_patient_id is the grouping
+# variable for mixed-effects. The 16 baseline_exposed_<class>
+# indicators let researchers run "did exposure to therapeutic class X
+# correlate with biological-age trajectory" out of the box.
+CLINIC_VARS = {
+    # Identifiers & demographics
+    'registry_patient_id':          'Patient ID (grouping for mixed-effects)',
+    'visit_number':                 'Visit number (1, 2, 3, ...)',
+    'age_at_visit':                 'Age at this visit (years)',
+    'age_baseline':                 'Age at first visit (years)',
+    'sex':                          'Sex',
+    'source_clinic':                'Source clinic',
+    # Biological-age clocks
+    'phenoage':                     'PhenoAge (Levine 2018, years)',
+    'phenoage_delta':               'PhenoAge δ vs chronological (years)',
+    'phenoage_mortality_10y':       'PhenoAge 10-year mortality risk',
+    'liver_age':                    'Liver age (NHANES-trained, years)',
+    'liver_age_delta':              'Liver age δ vs chronological (years)',
+    'kidney_age':                   'Kidney age (NHANES-trained, years)',
+    'kidney_age_delta':             'Kidney age δ vs chronological (years)',
+    'phenoage_delta_from_baseline': 'PhenoAge trajectory δ from baseline',
+    'liver_age_delta_from_baseline':  'Liver age trajectory δ from baseline',
+    'kidney_age_delta_from_baseline': 'Kidney age trajectory δ from baseline',
+    # PhenoAge-input labs
+    'albumin_g_dL':                 'Albumin (g/dL)',
+    'creatinine_mg_dL':             'Creatinine (mg/dL)',
+    'glucose_mg_dL':                'Glucose (mg/dL)',
+    'crp_cardiac_mg_L':             'hs-CRP (mg/L)',
+    'lymphs_pct':                   'Lymphocyte percent (%)',
+    'mcv_fL':                       'MCV (fL)',
+    'rdw_pct':                      'RDW (%)',
+    'alkaline_phosphatase_IU_L':    'Alkaline phosphatase (IU/L)',
+    'wbc_x10e3_uL':                 'WBC (x10^3/uL)',
+    # Cardiometabolic & CMP highlights
+    'hba1c_pct':                    'HbA1c (%)',
+    'hdl_mg_dL':                    'HDL cholesterol (mg/dL)',
+    'ldl_mg_dL':                    'LDL cholesterol (mg/dL)',
+    'triglycerides_mg_dL':          'Triglycerides (mg/dL)',
+    'total_cholesterol_mg_dL':      'Total cholesterol (mg/dL)',
+    'bun_mg_dL':                    'BUN (mg/dL)',
+    'egfr_mL_min_1_73':             'eGFR (mL/min/1.73m^2)',
+    'alt_IU_L':                     'ALT (IU/L)',
+    'ast_IU_L':                     'AST (IU/L)',
+    'bilirubin_total_mg_dL':        'Total bilirubin (mg/dL)',
+    'platelets_x10e3_uL':           'Platelets (x10^3/uL)',
+    # Hormones & longevity-relevant
+    'ferritin_ng_mL':               'Ferritin (ng/mL)',
+    'testosterone_total_ng_dL':     'Total testosterone (ng/dL)',
+    'igf1_ng_mL':                   'IGF-1 (ng/mL)',
+    'tsh_uIU_mL':                   'TSH (uIU/mL)',
+    'cortisol_morning_ug_dL':       'Cortisol morning (ug/dL)',
+    'uric_acid_mg_dL':              'Uric acid (mg/dL)',
+    'vitamin_d_25oh_ng_mL':         '25-OH Vitamin D (ng/mL)',
+    # Baseline therapeutic-class exposure indicators (binary 0/1)
+    'baseline_exposed_NAD_Pathway':             'Baseline: NAD Pathway',
+    'baseline_exposed_mTOR_Modulation':         'Baseline: mTOR Modulation',
+    'baseline_exposed_Senolytic':               'Baseline: Senolytic',
+    'baseline_exposed_Autophagy':               'Baseline: Autophagy',
+    'baseline_exposed_Mitochondrial_Support':   'Baseline: Mitochondrial Support',
+    'baseline_exposed_Antioxidant':             'Baseline: Antioxidant',
+    'baseline_exposed_Anti_Inflammatory':       'Baseline: Anti-Inflammatory',
+    'baseline_exposed_Cognitive_Support':       'Baseline: Cognitive Support',
+    'baseline_exposed_Adaptogen':               'Baseline: Adaptogen',
+    'baseline_exposed_Methylation_Support':     'Baseline: Methylation Support',
+    'baseline_exposed_Vitamin_Mineral':         'Baseline: Vitamin / Mineral',
+    'baseline_exposed_Sirtuin_Pathway':         'Baseline: Sirtuin Pathway',
+    'baseline_exposed_Hormone_Replacement':     'Baseline: Hormone Replacement',
+    'baseline_exposed_Peptide_Therapy':         'Baseline: Peptide Therapy',
+    'baseline_exposed_Metabolic':               'Baseline: Metabolic',
+    'baseline_exposed_Immune_Modulation':       'Baseline: Immune Modulation',
+}
+
 
 # ===========================================================================
 # Stats helpers
@@ -331,6 +405,21 @@ def load_geo_panel():
     return pd.read_parquet(GEO_PANEL_PARQUET)
 
 
+@st.cache_data
+def load_clinic_workbench():
+    """INEXION Clinic Layer flat view: one row per (patient, visit).
+
+    Joined: patients (demographics) x visits (~70 labs) x clocks
+    (PhenoAge / Liver / Kidney + deltas + trajectories) + 16 binary
+    baseline-exposure indicators (one per therapeutic class).
+    Built by inexion_registry.clinic.workbench.build_workbench_table()
+    in the pipeline.
+    """
+    if not data_exists(CLINIC_WORKBENCH_PARQUET):
+        return pd.DataFrame()
+    return pd.read_parquet(CLINIC_WORKBENCH_PARQUET)
+
+
 # Variable dictionary for the GEO Aging Gene Panel. Entries beyond the
 # (age, sex, tissue, dataset) basics are gene symbols whose values are
 # z-scored log1p expression within each cohort.
@@ -406,6 +495,7 @@ dbs       = load_dbs()
 midus     = load_midus()
 nshap     = load_nshap()
 geo_panel = load_geo_panel()
+clinic_wb = load_clinic_workbench()
 
 if "wb_log" not in st.session_state:
     st.session_state["wb_log"] = []
@@ -753,14 +843,20 @@ with col_left:
 
     dataset = st.selectbox(
         "Dataset",
-        ["NHANES 2001-2018", "HRS 2016 (VBS + Survey)",
+        ["INEXION Clinic Layer (synthetic_10k)",
+         "NHANES 2001-2018", "HRS 2016 (VBS + Survey)",
          "HRS DBS Longitudinal (2006-2016)",
          "MIDUS (M2 + R1 + M3, 2004-2022)",
          "NSHAP (R1 + R2 + R3, 2005-2016)",
          "GEO Aging Gene Panel (pooled RNA-seq, 5 cohorts)"],
         help=(
             "Biomarker cohorts have one row per (subject, wave) with named "
-            "biomarker variables. The GEO Aging Gene Panel pools samples from "
+            "biomarker variables. The INEXION Clinic Layer is one row per "
+            "(patient, visit) with ~70 lab markers + clocks + 16 binary "
+            "baseline-exposure indicators (one per therapeutic class). "
+            "Use `registry_patient_id` as the grouping variable for "
+            "mixed-effects models when running on clinic data. "
+            "The GEO Aging Gene Panel pools samples from "
             "5 RNA-seq cohorts with one row per sample and 50 z-scored "
             "aging-related gene columns. For pooled GEO analyses, mixed-effects "
             "with `dataset` as random intercept is the recommended model "
@@ -769,7 +865,10 @@ with col_left:
             "Decomposition pages."
         ),
     )
-    if dataset.startswith("NHANES"):
+    if dataset.startswith("INEXION Clinic"):
+        df = clinic_wb
+        var_dict = {**CLINIC_VARS}
+    elif dataset.startswith("NHANES"):
         df = nhanes
         var_dict = {**NHANES_VARS}
     elif dataset.startswith("HRS DBS"):
@@ -850,7 +949,10 @@ with col_left:
             format_func=lambda k: var_dict.get(k, k),
         )
     elif model.startswith("Mixed"):
-        grouping_options = [c for c in ['hhidpn', 'midus_id', 'seqn'] if c in df.columns]
+        grouping_options = [c for c in [
+            'hhidpn', 'midus_id', 'seqn', 'nshap_id',
+            'registry_patient_id', 'dataset',
+        ] if c in df.columns]
         if not grouping_options:
             st.error("Mixed-effects requires a grouping ID (hhidpn / midus_id). "
                      "Try HRS DBS Longitudinal.")
