@@ -699,7 +699,15 @@ def run_mixed(df, exposure, outcome, grouping, covariates):
     n = len(sub)
     n_groups = sub[grouping].nunique()
     if n < 200 or n_groups < 30:
-        return None, f"n={n}, groups={n_groups} - too few"
+        # Surface diagnostic info when the dropna kills the dataset.
+        # Helps spot Cloud-vs-local divergences fast.
+        nulls = df[needed].isna().sum().to_dict()
+        dtypes = {c: str(df[c].dtype) for c in needed if c in df.columns}
+        return None, (
+            f"n={n}, groups={n_groups} - too few. "
+            f"df.shape={df.shape}, needed={needed}, "
+            f"nulls_per_col={nulls}, dtypes={dtypes}"
+        )
     formula_rhs = " + ".join([exposure] + covariates) if covariates else exposure
     try:
         md = MixedLM.from_formula(f"{outcome} ~ {formula_rhs}",
