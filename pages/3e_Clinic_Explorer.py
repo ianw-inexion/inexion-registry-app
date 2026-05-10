@@ -28,7 +28,7 @@ from src.config import (
     NAVY, GOLD, CORAL, TEAL, LIGHT_BG,
     CLINIC_PATIENTS_PARQUET, CLINIC_VISITS_PARQUET,
     CLINIC_INTERVENTIONS_PARQUET, CLINIC_NOTES_PARQUET,
-    CLINIC_CLOCKS_PARQUET,
+    CLINIC_CLOCKS_PARQUET, CLINIC_RESPONSE_PARQUET,
     data_exists,
 )
 
@@ -94,10 +94,20 @@ def _load_notes(max_rows: int = 50_000):
     return df.head(max_rows) if len(df) > max_rows else df
 
 
+@st.cache_data(show_spinner=False)
+def _load_response():
+    """Phase E response-analytics parquet (one row per
+    therapeutic_class × outcome_clock)."""
+    if not data_exists(CLINIC_RESPONSE_PARQUET):
+        return pd.DataFrame()
+    return pd.read_parquet(CLINIC_RESPONSE_PARQUET)
+
+
 patients      = _load_patients()
 visits        = _load_visits()
 interventions = _load_interventions()
 clocks        = _load_clocks()
+response      = _load_response()
 
 
 # ---- Stub-state when no data is loaded ----
@@ -225,6 +235,7 @@ else:
 tabs = st.tabs([
     "Cohort Overview", "Lab Distributions", "Interventions",
     "Biological-Age Clocks", "Per-Patient Drill-In",
+    "Response Analytics",
 ])
 
 
@@ -641,6 +652,153 @@ with tabs[4]:
                 f"Lab values across {len(pat_vis)} visits", expanded=False
             ):
                 st.dataframe(pat_vis, use_container_width=True, height=400)
+
+
+# =========================================================================
+# TAB 6 - RESPONSE ANALYTICS  (Phase E)
+# =========================================================================
+with tabs[5]:
+    # Honest caveat banner. The synthetic seed cohort was generated
+    # without any baked-in treatment effects, so estimates scatter
+    # around zero. The framework is the asset; numbers will be real
+    # when Healthspan data lands.
+    st.warning(
+        ":material/warning: **Framework demo - not a finding.** "
+        "synthetic_10k was generated without baked-in treatment "
+        "effects. ATE estimates here scatter around zero by "
+        "construction. The propensity-score matching, balance "
+        "diagnostics, and bootstrap CI machinery is real and will "
+        "produce real numbers once Healthspan data lands."
+    )
+
+    if response.empty:
+        st.info(
+            "Response-analytics parquet not on disk yet. Re-run "
+            "`build_clinic_parquet.py` to compute it (requires "
+            "harmonized interventions + clocks)."
+        )
+    else:
+        st.markdown("#### Per-class treatment-effect estimates")
+        st.caption(
+            "1:1 propensity-score matching on baseline age, sex, "
+            "PhenoAge, log-CRP. Caliper = 0.2 SD on logit(PS). "
+            "ATE = mean trajectory in matched-treated minus matched-"
+            "controls; negative = exposed group aged slower than "
+            "matched controls. 95% CIs from 1,000 bootstrap resamples."
+        )
+
+        # Outcome selector
+        outcome_label_map = {
+            "PhenoAge δ trajectory":   "phenoage",
+            "Liver age δ trajectory":  "liver_age",
+            "Kidney age δ trajectory": "kidney_age",
+        }
+        chosen_label = st.radio(
+            "Outcome",
+            list(outcome_label_map.keys()),
+            horizontal=True,
+            key="resp_outcome",
+        )
+        outcome_key = outcome_label_map[chosen_label]
+        sub = response[response["outcome_clock"] == outcome_key].copy()
+        sub = sub[sub["notes"] == "OK"]
+        sub = sub.sort_values("ate_point")
+
+        if sub.empty:
+            st.info(
+                "No therapeutic class met the matching threshold for "
+                "this outcome. Try another outcome or rebuild after "
+                "more interventions are recorded."
+            )
+        else:
+            # Forest plot
+            fig = go.Figure()
+            for _, r in sub.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[r["ate_ci_lo"], r["ate_ci_hi"]],
+                    y=[r["therapeutic_class"], r["therapeutic_class"]],
+                    mode="lines",
+                    line=dict(color="#9DA1AC", width=2),
+                    showlegend=False,
+                ))
+            fig.add_trace(go.Scatter(
+                x=sub["ate_point"], y=sub["therapeutic_class"],
+                mode="markers",
+                marker=dict(size=10, color=NAVY,
+                              line=dict(color="white", width=1)),
+                name="ATE",
+                showlegend=False,
+            ))
+            fig.add_vline(x=0, line_dash="dash", line_color=GOLD,
+                            annotation_text="No effect",
+                            annotation_position="top")
+            fig.update_layout(
+                title=f"{chosen_label} - ATE by therapeutic class "
+                          "(synthetic data)",
+                height=max(300, 28 * len(sub) + 120),
+                plot_bgcolor="white",
+                xaxis_title="ATE (years; <0 = exposed aged slower)",
+                yaxis_title="",
+                margin=dict(l=180),
+            )
+            st.plotly_chart(fig, use_container_width=True,
+                              key="resp_forest")
+
+            # Detail table
+            st.markdown("#### Estimates + balance diagnostics")
+            tbl = sub.copy()
+            tbl["ATE [95% CI]"] = tbl.apply(
+                lambda r: f"{r['ate_point']:+.2f} "
+                            f"[{r['ate_ci_lo']:+.2f}, {r['ate_ci_hi']:+.2f}]",
+                axis=1,
+            )
+            tbl["p"]   = tbl["ate_p_value"].map(
+                lambda v: f"{v:.3f}" if pd.notna(v) else "-"
+            )
+            tbl["SMD baseline PhenoAge"] = tbl["smd_baseline_phenoage"].map(
+                lambda v: f"{v:+.3f}" if pd.notna(v) else "-"
+            )
+            display = tbl[[
+                "therapeutic_class", "n_exposed", "n_unexposed",
+                "n_matched_pairs", "ATE [95% CI]", "p",
+                "SMD baseline PhenoAge",
+            ]].rename(columns={
+                "therapeutic_class":   "Therapeutic class",
+                "n_exposed":           "N exposed",
+                "n_unexposed":         "N unexposed",
+                "n_matched_pairs":     "Matched pairs",
+            })
+            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.caption(
+                "**Reading the SMD column:** |SMD| < 0.10 = baseline "
+                "PhenoAge balanced after matching (good); 0.10-0.25 = "
+                "moderate imbalance; > 0.25 = poor balance, ATE may "
+                "be confounded."
+            )
+
+            # Skipped classes
+            skipped = response[
+                (response["outcome_clock"] == outcome_key)
+                & (response["notes"] != "OK")
+            ]
+            if len(skipped) > 0:
+                with st.expander(
+                    f"{skipped['therapeutic_class'].nunique()} classes "
+                    "skipped (insufficient N or match failure)",
+                    expanded=False,
+                ):
+                    st.dataframe(
+                        skipped[["therapeutic_class", "n_exposed",
+                                   "n_unexposed", "notes"]]
+                        .drop_duplicates("therapeutic_class")
+                        .rename(columns={
+                            "therapeutic_class": "Therapeutic class",
+                            "n_exposed":         "N exposed",
+                            "n_unexposed":       "N unexposed",
+                            "notes":             "Reason",
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
 
 
 st.markdown("---")
