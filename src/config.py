@@ -60,16 +60,20 @@ else:
     _ROOT = _DEFAULT_LOCAL
 
 
-def _path(tree_prefix: str, flat_filename: str):
+def _path(tree_prefix: str, tree_filename: str, flat_filename: str = None):
     """Build a FILE data path that works in all three modes.
 
-    tree_prefix:   the S3-layout prefix (Schema v0.3), used only in tree_s3 mode.
-    flat_filename: the legacy filename within the flat staging dir, used in flat modes.
+    tree_prefix:    the S3-layout prefix (Schema v0.3), used in tree_s3 mode.
+    tree_filename:  the filename within the tree prefix, used in tree_s3 mode.
+    flat_filename:  the legacy filename within the flat staging dir.
+                    If None, defaults to tree_filename (used when both layouts have the same filename).
 
     Returns str for S3, Path for local.
     """
+    if flat_filename is None:
+        flat_filename = tree_filename
     if MODE == "tree_s3":
-        return f"{_ROOT}/{tree_prefix.strip('/')}/{flat_filename}"
+        return f"{_ROOT}/{tree_prefix.strip('/')}/{tree_filename}"
     if IS_S3:
         return f"{_ROOT}/{flat_filename}"
     return Path(_ROOT) / flat_filename
@@ -144,18 +148,18 @@ BRFSS_METRO_PARQUET       = _path("bronze/public/brfss/2024",             "brfss
 
 # GEO molecular-aging reference — Bronze, Public
 GEO_PANEL_PARQUET         = _path("bronze/public/geo/_panel",             "geo_aging_panel.parquet")
-GEO_CATALOG_PARQUET       = _path("bronze/public/geo/datasets",           "geo/catalog_summary.parquet")
+GEO_CATALOG_PARQUET       = _path("bronze/public/geo/datasets", "catalog_summary.parquet", "geo/catalog_summary.parquet")
 GEO_DATASET_DIR           = _path_dir("bronze/public/geo/datasets",       "geo")
 
 # Clinic data layer (synthetic seed today) — Derived
-CLINIC_PATIENTS_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_patients.parquet")
-CLINIC_VISITS_PARQUET        = _path("derived/clinic_synthetic_10k",  "clinic/clinic_visits.parquet")
-CLINIC_INTERVENTIONS_PARQUET = _path("derived/clinic_synthetic_10k",  "clinic/clinic_interventions.parquet")
-CLINIC_NOTES_PARQUET         = _path("derived/clinic_synthetic_10k",  "clinic/clinic_notes.parquet")
-CLINIC_CLOCKS_PARQUET        = _path("derived/clinic_synthetic_10k",  "clinic/clinic_clocks.parquet")
-CLINIC_TAXONOMY_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_intervention_taxonomy.parquet")
-CLINIC_RESPONSE_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_response_analytics.parquet")
-CLINIC_WORKBENCH_PARQUET     = _path("derived/clinic_synthetic_10k",  "clinic/clinic_workbench.parquet")
+CLINIC_PATIENTS_PARQUET      = _path("derived/clinic_synthetic_10k", "clinic_patients.parquet",              "clinic/clinic_patients.parquet")
+CLINIC_VISITS_PARQUET        = _path("derived/clinic_synthetic_10k", "clinic_visits.parquet",                "clinic/clinic_visits.parquet")
+CLINIC_INTERVENTIONS_PARQUET = _path("derived/clinic_synthetic_10k", "clinic_interventions.parquet",         "clinic/clinic_interventions.parquet")
+CLINIC_NOTES_PARQUET         = _path("derived/clinic_synthetic_10k", "clinic_notes.parquet",                 "clinic/clinic_notes.parquet")
+CLINIC_CLOCKS_PARQUET        = _path("derived/clinic_synthetic_10k", "clinic_clocks.parquet",                "clinic/clinic_clocks.parquet")
+CLINIC_TAXONOMY_PARQUET      = _path("derived/clinic_synthetic_10k", "clinic_intervention_taxonomy.parquet", "clinic/clinic_intervention_taxonomy.parquet")
+CLINIC_RESPONSE_PARQUET      = _path("derived/clinic_synthetic_10k", "clinic_response_analytics.parquet",    "clinic/clinic_response_analytics.parquet")
+CLINIC_WORKBENCH_PARQUET     = _path("derived/clinic_synthetic_10k", "clinic_workbench.parquet",             "clinic/clinic_workbench.parquet")
 
 # Headline analyses — Derived
 HEADLINE_DIR              = _path_dir("derived/headline_analyses",        "headline_analyses")
@@ -423,6 +427,7 @@ DATASETS = [
     },
     {
         "id": "brfss",
+        "name": "BRFSS 2024",
         "source": "CDC Behavioral Risk Factor Surveillance System",
         "status": "Available",
         "access": "Public",
