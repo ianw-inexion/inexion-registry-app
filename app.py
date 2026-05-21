@@ -80,6 +80,17 @@ _PAGES = {
                  title="Patient Analysis",
                  icon=":material/person:"),
     ],
+    "Partner Analytics": [
+        st.Page("app_pages/4a_Healthspan_Cohort_Analysis.py",
+                 title="Healthspan Cohort Analysis",
+                 icon=":material/insights:"),
+        st.Page("app_pages/4b_AgelessRx_Cohort_Analysis.py",
+                 title="AgelessRx Cohort Analysis",
+                 icon=":material/insights:"),
+        st.Page("app_pages/4c_Cross_Partner_View.py",
+                 title="Cross-Partner View",
+                 icon=":material/compare_arrows:"),
+    ],
     "Clocks & Validation": [
         st.Page("app_pages/5_Validation.py",
                  title="Validation Dashboard",
@@ -263,6 +274,24 @@ components.html(
         tag();
         // Re-tag whenever Streamlit re-renders any part of the sidebar
         const sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
+        if (sidebar) {
+            const obs = new MutationObserver(() => {
+                // Defer one frame so emotion classes settle before measuring
+                requestAnimationFrame(tag);
+            });
+            obs.observe(sidebar, {childList: true, subtree: true});
+        }
+        // Safety net: re-tag a few times after initial load
+        setTimeout(tag, 100);
+        setTimeout(tag, 400);
+        setTimeout(tag, 1000);
+    })();
+    </script>
+    """,
+    height=0, width=0,
+)
+
+pg.run()
         if (sidebar) {
             const obs = new MutationObserver(() => {
                 // Defer one frame so emotion classes settle before measuring
