@@ -292,21 +292,3 @@ components.html(
 )
 
 pg.run()
-        if (sidebar) {
-            const obs = new MutationObserver(() => {
-                // Defer one frame so emotion classes settle before measuring
-                requestAnimationFrame(tag);
-            });
-            obs.observe(sidebar, {childList: true, subtree: true});
-        }
-        // Safety net: re-tag a few times after initial load
-        setTimeout(tag, 100);
-        setTimeout(tag, 400);
-        setTimeout(tag, 1000);
-    })();
-    </script>
-    """,
-    height=0, width=0,
-)
-
-pg.run()
