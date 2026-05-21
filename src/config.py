@@ -1,15 +1,33 @@
 """
-Central configuration for the INEXION Registry app prototype.
+Central configuration for the INEXION Registry app.
 
-Supports three deployment modes:
-- Local (default): parquet lives in the sibling pipeline folder
-- S3: set INEXION_DATA_DIR=s3://inexion-registry/temp_Ian_Nirav/staging
-- Streamlit Cloud: secrets auto-loaded in app.py -> env vars -> picked up here
+Three deployment modes, in priority order:
+
+1. PRODUCTION TREE (S3, OMOP-aligned layout per Schema v0.3)
+   Set: INEXION_BUCKET_ROOT=s3://inexion-registry
+   Paths resolve as: <bucket_root>/<source-tree-prefix>/<filename>
+   Example: s3://inexion-registry/bronze/public/nhanes/1999_2018/nhanes_with_phenoage.parquet
+
+2. LEGACY FLAT (backward-compat for the sandbox era, kept as a safety net)
+   Set: INEXION_DATA_DIR=s3://inexion-registry/temp_Ian_Nirav/staging
+   or:  INEXION_DATA_DIR=/local/path/to/staging
+   Paths resolve as: <data_dir>/<flat_filename>   (prefix ignored)
+
+3. LOCAL DEFAULT (no env var set)
+   Resolves to ../inexion-registry-pipeline/data/staging (flat)
+
+Each data-path constant declares BOTH a tree prefix (for production) AND
+a flat filename (for legacy). The path helper picks the right one based on
+the active mode. This keeps the migration reversible: revert INEXION_BUCKET_ROOT
+to INEXION_DATA_DIR and the app works against the old sandbox.
 """
+
 from pathlib import Path
 import os
 
+# ---------------------------------------------------------------------------
 # Brand
+# ---------------------------------------------------------------------------
 NAVY = "#0D1B3E"
 GOLD = "#C9941A"
 DARK_TEXT = "#1A1A2E"
@@ -19,21 +37,61 @@ TEAL = "#2E8B8B"
 
 BRAND_COLORWAY = [NAVY, GOLD, TEAL, CORAL, "#6B6B8D", "#8B6B3E"]
 
-# Data path resolution
-_REPO_ROOT   = Path(__file__).resolve().parent.parent
-_DEFAULT_DATA = str(_REPO_ROOT.parent / "inexion-registry-pipeline" / "data" / "staging")
-_DATA_DIR_RAW = os.environ.get("INEXION_DATA_DIR", _DEFAULT_DATA)
+# ---------------------------------------------------------------------------
+# Mode resolution
+# ---------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_LOCAL = str(_REPO_ROOT.parent / "inexion-registry-pipeline" / "data" / "staging")
 
-IS_S3 = _DATA_DIR_RAW.startswith("s3://")
+_BUCKET_ROOT_ENV = os.environ.get("INEXION_BUCKET_ROOT")
+_DATA_DIR_ENV = os.environ.get("INEXION_DATA_DIR")
 
-def _dp(filename: str):
-    """Build a data path - returns str for S3, Path for local."""
+if _BUCKET_ROOT_ENV:
+    MODE = "tree_s3"
+    IS_S3 = True
+    _ROOT = _BUCKET_ROOT_ENV.rstrip("/")
+elif _DATA_DIR_ENV:
+    MODE = "flat_legacy"
+    IS_S3 = _DATA_DIR_ENV.startswith("s3://")
+    _ROOT = _DATA_DIR_ENV.rstrip("/") if IS_S3 else _DATA_DIR_ENV
+else:
+    MODE = "flat_default"
+    IS_S3 = False
+    _ROOT = _DEFAULT_LOCAL
+
+
+def _path(tree_prefix: str, flat_filename: str):
+    """Build a FILE data path that works in all three modes.
+
+    tree_prefix:   the S3-layout prefix (Schema v0.3), used only in tree_s3 mode.
+    flat_filename: the legacy filename within the flat staging dir, used in flat modes.
+
+    Returns str for S3, Path for local.
+    """
+    if MODE == "tree_s3":
+        return f"{_ROOT}/{tree_prefix.strip('/')}/{flat_filename}"
     if IS_S3:
-        return f"{_DATA_DIR_RAW.rstrip('/')}/{filename}"
-    return Path(_DATA_DIR_RAW) / filename
+        return f"{_ROOT}/{flat_filename}"
+    return Path(_ROOT) / flat_filename
+
+
+def _path_dir(tree_prefix: str, flat_subdir: str):
+    """Build a DIRECTORY data path that works in all three modes.
+
+    tree_prefix: the S3-layout directory prefix (used as-is in tree_s3 mode).
+    flat_subdir: the subdirectory under the legacy flat staging dir.
+
+    Returns str for S3, Path for local.
+    """
+    if MODE == "tree_s3":
+        return f"{_ROOT}/{tree_prefix.strip('/')}"
+    if IS_S3:
+        return f"{_ROOT}/{flat_subdir}"
+    return Path(_ROOT) / flat_subdir
+
 
 def data_exists(path) -> bool:
-    """Check if a data file exists - works for both local and S3."""
+    """Check if a data file or prefix exists. Works for both local and S3."""
     if IS_S3:
         try:
             import s3fs
@@ -43,51 +101,79 @@ def data_exists(path) -> bool:
             return False
     return Path(path).exists()
 
-# Expose DATA_DIR for legacy code that uses it as a Path
-DATA_DIR = Path(_DATA_DIR_RAW) if not IS_S3 else _DATA_DIR_RAW
 
-NHANES_PARQUET       = _dp("nhanes_with_phenoage.parquet")
-NHANES_MORTALITY_PARQUET = _dp("nhanes_with_mortality.parquet")
-HRS_MORTALITY_PARQUET    = _dp("hrs_mortality.parquet")
-MIDUS_MORTALITY_PARQUET  = _dp("midus_mortality.parquet")
-BRFSS_STATE_PARQUET  = _dp("brfss_state_scores.parquet")
-BRFSS_METRO_PARQUET  = _dp("brfss_metro_scores.parquet")
-NHANES_HARMONIZED    = _dp("nhanes_harmonized.parquet")
-HRS_PUBLIC_PARQUET   = _dp("hrs_public_2016.parquet")
-HRS_VBS_PARQUET      = _dp("hrs_vbs_with_phenoage.parquet")
-HRS_DBS_PARQUET      = _dp("hrs_dbs_longitudinal.parquet")
-HRS_EPIGEN_PARQUET   = _dp("hrs_epigenetic_clocks.parquet")
-HRS_POA_PARQUET      = _dp("hrs_paceofaging.parquet")
-MIDUS_BIO_PARQUET    = _dp("midus_biomarker.parquet")
-MIDUS_COG_PARQUET    = _dp("midus_cognitive_m3.parquet")
-MIDUS_CODEBOOK_PARQUET = _dp("midus_codebook.parquet")
-NSHAP_BIO_PARQUET      = _dp("nshap_biomarker.parquet")
-NSHAP_SOCIAL_PARQUET   = _dp("nshap_social.parquet")
-NSHAP_CODEBOOK_PARQUET = _dp("nshap_codebook.parquet")
-# GEO molecular-aging reference catalog (15 curated transcriptomics datasets)
-GEO_CATALOG_PARQUET    = _dp("geo/catalog_summary.parquet")
-GEO_DATASET_DIR        = _dp("geo")  # holds <accession>/{metadata,expression,series_info}
-GEO_PANEL_PARQUET      = _dp("geo_aging_panel.parquet")  # 50-gene aging panel pooled across RNA-seq cohorts
+# Expose DATA_DIR for legacy code that uses it as a root pointer
+DATA_DIR = Path(_ROOT) if not IS_S3 else _ROOT
 
-# Clinic-data layer - Healthspan-style longitudinal patient registries
-CLINIC_PATIENTS_PARQUET      = _dp("clinic/clinic_patients.parquet")
-CLINIC_VISITS_PARQUET        = _dp("clinic/clinic_visits.parquet")
-CLINIC_INTERVENTIONS_PARQUET = _dp("clinic/clinic_interventions.parquet")
-CLINIC_NOTES_PARQUET         = _dp("clinic/clinic_notes.parquet")
-CLINIC_CLOCKS_PARQUET        = _dp("clinic/clinic_clocks.parquet")
-CLINIC_TAXONOMY_PARQUET      = _dp("clinic/clinic_intervention_taxonomy.parquet")
-CLINIC_RESPONSE_PARQUET      = _dp("clinic/clinic_response_analytics.parquet")
-CLINIC_WORKBENCH_PARQUET     = _dp("clinic/clinic_workbench.parquet")
-HEADLINE_DIR         = _dp("headline_analyses")
-ORGAN_CLOCKS_PARAMS_PATH    = _dp("organ_clocks_params.json")
-ORGAN_CLOCKS_VALIDATION_PATH = _dp("organ_clocks_validation.json")
+# ---------------------------------------------------------------------------
+# Data path constants
+# Each constant declares its tree-mode prefix and its legacy flat filename.
+# When INEXION_BUCKET_ROOT is set, paths use the tree layout.
+# When INEXION_DATA_DIR is set, paths use the legacy flat layout.
+# ---------------------------------------------------------------------------
 
+# NHANES — Bronze, Public
+NHANES_PARQUET            = _path("bronze/public/nhanes/1999_2018",       "nhanes_with_phenoage.parquet")
+NHANES_HARMONIZED         = _path("bronze/public/nhanes/1999_2018",       "nhanes_harmonized.parquet")
+NHANES_MORTALITY_PARQUET  = _path("bronze/public/nhanes/1999_2018",       "nhanes_with_mortality.parquet")
+
+# HRS Public-use (RAND) — Bronze, Public
+HRS_PUBLIC_PARQUET        = _path("bronze/public/hrs_public/2016",        "hrs_public_2016.parquet")
+
+# HRS Restricted Data Agreement — Bronze, Restricted
+HRS_VBS_PARQUET           = _path("bronze/restricted/hrs_rda/vbs_2016",          "hrs_vbs_with_phenoage.parquet")
+HRS_DBS_PARQUET           = _path("bronze/restricted/hrs_rda/dbs_2006_2016",     "hrs_dbs_longitudinal.parquet")
+HRS_EPIGEN_PARQUET        = _path("bronze/restricted/hrs_rda/epigen_2016",       "hrs_epigenetic_clocks.parquet")
+HRS_POA_PARQUET           = _path("bronze/restricted/hrs_rda/poa",               "hrs_paceofaging.parquet")
+HRS_MORTALITY_PARQUET     = _path("bronze/restricted/hrs_rda/mortality",         "hrs_mortality.parquet")
+
+# MIDUS — Bronze, Public (ICPSR registration)
+MIDUS_BIO_PARQUET         = _path("bronze/public/midus/biomarker",        "midus_biomarker.parquet")
+MIDUS_COG_PARQUET         = _path("bronze/public/midus/cognitive_m3",     "midus_cognitive_m3.parquet")
+MIDUS_CODEBOOK_PARQUET    = _path("bronze/public/midus/_meta",            "midus_codebook.parquet")
+MIDUS_MORTALITY_PARQUET   = _path("bronze/public/midus/mortality",        "midus_mortality.parquet")
+
+# NSHAP — Bronze, Public (ICPSR + restricted overlay)
+NSHAP_BIO_PARQUET         = _path("bronze/public/nshap/biomarker",        "nshap_biomarker.parquet")
+NSHAP_SOCIAL_PARQUET      = _path("bronze/public/nshap/social",           "nshap_social.parquet")
+NSHAP_CODEBOOK_PARQUET    = _path("bronze/public/nshap/_meta",            "nshap_codebook.parquet")
+
+# BRFSS — Bronze, Public
+BRFSS_STATE_PARQUET       = _path("bronze/public/brfss/2024",             "brfss_state_scores.parquet")
+BRFSS_METRO_PARQUET       = _path("bronze/public/brfss/2024",             "brfss_metro_scores.parquet")
+
+# GEO molecular-aging reference — Bronze, Public
+GEO_PANEL_PARQUET         = _path("bronze/public/geo/_panel",             "geo_aging_panel.parquet")
+GEO_CATALOG_PARQUET       = _path("bronze/public/geo/datasets",           "geo/catalog_summary.parquet")
+GEO_DATASET_DIR           = _path_dir("bronze/public/geo/datasets",       "geo")
+
+# Clinic data layer (synthetic seed today) — Derived
+CLINIC_PATIENTS_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_patients.parquet")
+CLINIC_VISITS_PARQUET        = _path("derived/clinic_synthetic_10k",  "clinic/clinic_visits.parquet")
+CLINIC_INTERVENTIONS_PARQUET = _path("derived/clinic_synthetic_10k",  "clinic/clinic_interventions.parquet")
+CLINIC_NOTES_PARQUET         = _path("derived/clinic_synthetic_10k",  "clinic/clinic_notes.parquet")
+CLINIC_CLOCKS_PARQUET        = _path("derived/clinic_synthetic_10k",  "clinic/clinic_clocks.parquet")
+CLINIC_TAXONOMY_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_intervention_taxonomy.parquet")
+CLINIC_RESPONSE_PARQUET      = _path("derived/clinic_synthetic_10k",  "clinic/clinic_response_analytics.parquet")
+CLINIC_WORKBENCH_PARQUET     = _path("derived/clinic_synthetic_10k",  "clinic/clinic_workbench.parquet")
+
+# Headline analyses — Derived
+HEADLINE_DIR              = _path_dir("derived/headline_analyses",        "headline_analyses")
+
+# Organ clocks — Derived
+ORGAN_CLOCKS_PARAMS_PATH      = _path("derived/organ_clocks",             "organ_clocks_params.json")
+ORGAN_CLOCKS_VALIDATION_PATH  = _path("derived/organ_clocks",             "organ_clocks_validation.json")
+
+# ---------------------------------------------------------------------------
 # App metadata
+# ---------------------------------------------------------------------------
 APP_TITLE = "INEXION Longevity Registry"
 APP_TAGLINE = "INEXION Longevity Registry"
 APP_VERSION = "0.3.0-prototype"
 
-# Dataset catalog
+# ---------------------------------------------------------------------------
+# Dataset catalog (unchanged from prior version)
+# ---------------------------------------------------------------------------
 DATASETS = [
     {
         "id": "inexion_clinic",
@@ -271,9 +357,6 @@ DATASETS = [
     },
     {
         "id": "nshap",
-        "name": "NSHAP (4 rounds, 2005-2023)",
-        "source": "ICPSR / NORC at the University of Chicago",
-        "status": "Pipeline scaffolded - awaiting Anant ICPSR download",
         "access": "Public (ICPSR registration) + Restricted (IRB + DPP + DUA)",
         "participants": 12000,
         "cycles": 4,
@@ -334,22 +417,12 @@ DATASETS = [
         "cycle_range": "Cross-sectional + intervention",
         "description": (
             "15 curated transcriptomics datasets - the molecular reference layer "
-            "for the INEXION multi-omic platform. Includes blood immune aging "
-            "(Allen Human Immune Health Atlas, n=1,120), metformin RCT "
-            "(GSE157585), transcriptomic clock training (GSE193141), CD8 "
-            "senescence (GSE310729), multi-cell SASP signatures, intervention "
-            "response, and longitudinal fibroblast lifespan. 12 of 15 accessions "
-            "have analysis-ready expression matrices recoverable: 9 from GEO "
-            "supplementary, 1 from Zenodo (GSE248822), 2 from the Allen "
-            "Institute Immune Health Atlas (GSE271896, GSE275067). The "
-            "remaining 3 (24 + 33 + 82 samples) ship per-sample raw files "
-            "only and require either author outreach or local re-alignment."
+            "for the INEXION multi-omic platform."
         ),
         "path": GEO_CATALOG_PARQUET,
     },
     {
         "id": "brfss",
-        "name": "BRFSS 2024",
         "source": "CDC Behavioral Risk Factor Surveillance System",
         "status": "Available",
         "access": "Public",
@@ -358,9 +431,7 @@ DATASETS = [
         "cycle_range": "2024",
         "description": (
             "State-level health surveillance data for 457,670 U.S. adults. "
-            "Variables: income, exercise, health coverage, metro status. "
-            "Used for INEXION market targeting analysis. Top markets identified: "
-            "DC corridor (MD/VA suburban MSA), MA, NH, UT, CO."
+            "Variables: income, exercise, health coverage, metro status."
         ),
         "path": None,
     },
