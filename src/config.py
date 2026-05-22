@@ -361,6 +361,9 @@ DATASETS = [
     },
     {
         "id": "nshap",
+        "name": "NSHAP - National Social Life, Health, and Aging Project",
+        "source": "ICPSR / NORC at the University of Chicago",
+        "status": "Pipeline built - access pending",
         "access": "Public (ICPSR registration) + Restricted (IRB + DPP + DUA)",
         "participants": 12000,
         "cycles": 4,
