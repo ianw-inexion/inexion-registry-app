@@ -1,0 +1,12 @@
+# Line-ending policy. Matches inexion-clocks, which is the reference copy.
+#
+# The repository always stores LF. eol=lf also forces LF in the working tree on
+# checkout, on every platform, so a Windows editor that saves CRLF no longer
+# makes git report untouched files as modified.
+#
+# Added 2026-08-20. Only 2 of 55 tracked files had drifted here, but the repo had
+# no policy, so it was one bad save away from the state the other repos were in.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
